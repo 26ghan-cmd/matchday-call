@@ -269,6 +269,7 @@ function createPeer(id, name, initiator, state = {}) {
   pc.onconnectionstatechange = () => {
     const tile = tileEl(id);
     if (tile) tile.dataset.state = pc.connectionState;
+    if (pc.connectionState === 'connected') capBitrates(pc);
     if (pc.connectionState === 'failed') {
       toast(hasTurn()
         ? `Couldn't reach ${name}. Try reloading both pages.`
@@ -302,6 +303,27 @@ async function fillSlots(peer) {
     await transceivers[i].sender.replaceTrack(tracks[i] || null);
   }
   peer.slotsReady = true;
+}
+
+// Limit how much video we send each person. Faces don't need HD, and every
+// relayed byte counts against the TURN allowance. Caps survive track swaps.
+const MAX_BITRATE = { [SLOT.CAM]: 400_000, [SLOT.SCREEN]: 1_200_000 }; // bits per second
+
+async function capBitrates(pc) {
+  const transceivers = pc.getTransceivers();
+  for (const [slot, maxBitrate] of Object.entries(MAX_BITRATE)) {
+    const sender = transceivers[slot]?.sender;
+    if (!sender) continue;
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings?.length) params.encodings = [{}];
+      if (params.encodings[0].maxBitrate === maxBitrate) continue;
+      params.encodings[0].maxBitrate = maxBitrate;
+      await sender.setParameters(params);
+    } catch (err) {
+      console.warn('Could not cap bitrate', err);
+    }
+  }
 }
 
 // Put a new track (or nothing) into one slot on every connection.
