@@ -8,6 +8,7 @@ const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
 const { MatchHub } = require('./match/hub');
+const { zeroFromTap, validTap, computeLags } = require('./match/sync');
 
 const PORT = process.env.PORT || 3000;
 const MAX_PEERS = 6; // mesh calls work well up to ~6 people
@@ -44,6 +45,24 @@ hub.on('update', (fixtureId, payload) => {
 app.get('/api/fixtures', async (req, res) => {
   res.set('Cache-Control', 'no-store').json(await hub.listFixtures());
 });
+
+// ---------- TV sync ----------
+// room -> Map(socketId -> { h1, h2 }): when each person's TV showed the clock at
+// zero for each half (server time). See match/sync.js.
+const roomSync = new Map();
+
+function syncState(room) {
+  const cals = roomSync.get(room) || new Map();
+  const { lags, flagged } = computeLags(cals);
+  const members = io.sockets.adapter.rooms.get(room) || new Set();
+  return {
+    lags,
+    flagged,
+    synced: [...cals.entries()].map(([id, c]) => ({ id, halves: [c.h1 != null && 1, c.h2 != null && 2].filter(Boolean) })),
+    members: members.size,
+  };
+}
+const broadcastSync = (room) => io.to(room).emit('sync-state', syncState(room));
 
 function followMatch(room, fixtureId) {
   const previous = roomMatch.get(room);
@@ -153,6 +172,7 @@ io.on('connection', (socket) => {
     socket.emit('joined', {
       id: socket.id, peers, history: chatHistory.get(room) || [],
       match: matchId ? { fixtureId: matchId, data: hub.payload(matchId) } : null,
+      sync: syncState(room),
     });
     socket.to(room).emit('peer-joined', { id: socket.id, name, state: socket.data.state });
   });
@@ -185,8 +205,43 @@ io.on('connection', (socket) => {
         return;
       }
     }
+    const changed = id !== roomMatch.get(room) || id === 'demo';
     id = followMatch(room, id);
+    if (changed && roomSync.has(room)) { // a different match: old TV syncs no longer apply
+      roomSync.delete(room);
+      broadcastSync(room);
+    }
     io.to(room).emit('match-selected', { fixtureId: id, by: socket.data.name, data: id ? hub.payload(id) : null });
+  });
+
+  // A shared clock: clients work out the difference between their clock and
+  // ours, so taps from different devices can be compared accurately.
+  socket.on('time-ping', ({ t0 } = {}) => {
+    socket.emit('time-pong', { t0, server: Date.now() });
+  });
+
+  // "My TV's match clock just showed this time."
+  socket.on('sync', (tap = {}) => {
+    const room = socket.data.room;
+    if (!room || tooSoon(socket, 'sync', 500)) return;
+    const t = { half: Number(tap.half), clockSec: Number(tap.clockSec), tapAt: Number(tap.tapAt) };
+    if (!validTap(t)) {
+      socket.emit('sync-error', { message: "That sync didn't look right. Please try again." });
+      return;
+    }
+    if (!roomSync.has(room)) roomSync.set(room, new Map());
+    const cals = roomSync.get(room);
+    const mine = cals.get(socket.id) || {};
+    mine[t.half === 2 ? 'h2' : 'h1'] = zeroFromTap(t);
+    mine.at = Date.now();
+    cals.set(socket.id, mine);
+    broadcastSync(room);
+  });
+
+  socket.on('sync-clear', () => {
+    const room = socket.data.room;
+    if (!room || !roomSync.get(room)?.delete(socket.id)) return;
+    broadcastSync(room);
   });
 
   // Quick emoji reactions.
@@ -216,7 +271,10 @@ io.on('connection', (socket) => {
     socket.to(room).emit('peer-left', { id: socket.id });
     if (!io.sockets.adapter.rooms.get(room)) {
       chatHistory.delete(room);
+      roomSync.delete(room);
       followMatch(room, null); // stop fetching data nobody is watching
+    } else if (roomSync.get(room)?.delete(socket.id)) {
+      broadcastSync(room);
     }
   });
 });

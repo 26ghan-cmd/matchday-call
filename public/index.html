@@ -33,6 +33,7 @@
       <div class="room"><span class="dot"></span><span id="roomLabel"></span></div>
       <button id="scorebug" class="scorebug" hidden title="Match centre"></button>
       <div class="bar-right">
+        <button id="syncBtn" class="sync-btn">⏱ <span>Sync TV</span></button>
         <button id="countBtn" class="count" title="People in the room">👥 <span id="countLabel">1</span></button>
         <div class="mode-switch" role="group" aria-label="Layout">
           <button data-mode="match" class="active" title="Compact faces, eyes on the TV">Match</button>
@@ -102,6 +103,7 @@
             </div>
           </div>
           <video id="stageVideo" autoplay playsinline muted></video>
+          <canvas id="stageCanvas"></canvas>
           <div id="stageFloat" class="float-layer"></div>
           <div class="stage-bar">
             <span id="stageLabel"></span>
@@ -175,10 +177,71 @@
     </form>
   </dialog>
 
+  <!-- ===== Sync with your TV ===== -->
+  <dialog id="syncDialog">
+    <form method="dialog" class="sync-form">
+      <h2>Sync with your TV</h2>
+      <p class="hint">Everyone's TV or stream runs at a different delay. Sync once, and friends whose TV is ahead of yours are held back, so you never hear a cheer before you see the goal.</p>
+
+      <div id="syncModes" class="seg" role="tablist">
+        <button type="button" data-mode="clock" class="active">Match clock</button>
+        <button type="button" data-mode="kickoff">Kick-off</button>
+      </div>
+
+      <div id="syncClockPane">
+        <p>Watch the clock in the corner of your TV. Tap the button <strong>the moment it ticks over</strong> to a new minute.</p>
+        <button type="button" id="syncTap" class="tap-btn">Tap as the minute changes</button>
+        <div id="syncConfirm" class="sync-confirm" hidden>
+          <p>Which time did your TV just show?</p>
+          <div class="minute-row">
+            <button type="button" id="minDown" class="round-btn" aria-label="One minute earlier">−</button>
+            <input id="syncMinute" type="number" min="0" max="105" inputmode="numeric" aria-label="Minute">
+            <span class="colon">:00</span>
+            <button type="button" id="minUp" class="round-btn" aria-label="One minute later">+</button>
+          </div>
+          <div id="syncHalf" class="seg small">
+            <button type="button" data-half="1" class="active">First half</button>
+            <button type="button" data-half="2">Second half</button>
+          </div>
+          <div class="confirm-actions">
+            <button type="button" id="syncRetap" class="small-btn">Tap again</button>
+            <button type="button" id="syncSave" class="primary-btn">Save sync</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="syncKickoffPane" hidden>
+        <p>Tap the moment the referee blows the whistle to start the half.</p>
+        <div id="kickHalf" class="seg small">
+          <button type="button" data-half="1" class="active">First half</button>
+          <button type="button" data-half="2">Second half</button>
+        </div>
+        <button type="button" id="syncKickTap" class="tap-btn">Kick-off!</button>
+      </div>
+
+      <p id="syncResult" class="sync-result" role="status"></p>
+
+      <h3>The room</h3>
+      <ul id="syncPeople" class="sync-people"></ul>
+      <p id="syncSummary" class="hint"></p>
+
+      <label class="toggle-row">
+        <input type="checkbox" id="shieldToggle" checked>
+        <span><strong>Spoiler shield</strong><br><small>Hold back friends whose TV is ahead of mine: their video, voice, chat and reactions.</small></span>
+      </label>
+
+      <div class="sync-actions">
+        <button type="button" id="syncReset" class="small-btn">Clear my sync</button>
+        <button value="close" class="primary-btn">Done</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="toast" class="toast" role="status"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>
   <script src="match.js"></script>
+  <script src="sync.js"></script>
 </body>
 </html>

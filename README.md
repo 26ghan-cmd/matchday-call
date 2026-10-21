@@ -45,8 +45,16 @@ to avoid feedback.
 - **Settings:** choose microphone, camera and speakers (speaker choice works in
   Chrome and Edge).
 - **Talking ring:** a green outline around whoever is speaking.
-- **Spoiler delay:** in Settings, hold back the match data by 10–90 seconds so the
-  score never changes before your TV shows the goal.
+- **Sync with your TV + spoiler shield:** everyone taps ⏱ **Sync TV** when their
+  TV's match clock ticks over to a new minute (or at kick-off). The app works out
+  how far behind each TV is and, for friends whose TV is ahead of yours, holds back
+  their video, voice, chat and reactions by the difference, so a cheer never
+  arrives before you've seen the goal. The people list shows everyone's lag. A
+  sync that's more than 2½ minutes off from everyone else's is ignored and that
+  person is asked to check it. The shield can be switched off in the sync window.
+  Screen shares aren't held back.
+- **Spoiler delay for match data:** in Settings, hold back the match centre by
+  10–90 seconds so the score never changes before your TV shows the goal.
 - Keyboard shortcuts: **M** mic, **V** camera, **S** share, **C** chat,
   **G** match centre, **H** layout, **1–6** reactions, **Esc** close panel.
 - Echo cancellation and noise suppression are on, to keep TV commentary out of the call.
@@ -63,10 +71,14 @@ match/api-football.js  Live Premier League data and odds from API-Football.
 match/demo.js    The demo match: fictional clubs, simulated play, modelled odds.
 match/feed.js    Turns data changes into play-by-play lines and stats-based analysis.
 match/ai.js      Optional AI-written analysis (Claude).
+match/sync.js    TV sync maths: from each person's clock taps, how far behind their TV is.
 public/app.js    WebRTC: every browser connects directly to every other (a "mesh").
                  Each connection has three fixed slots (mic, camera, screen), so
                  sharing or switching devices never interrupts the call.
 public/match.js  The match centre interface and the spoiler delay.
+public/sync.js   Sync dialog, shared clock, and the spoiler shield: delayed audio
+                 (Web Audio), delayed video (a rolling buffer of small snapshots),
+                 and held-back chat and reactions.
 public/*.html/css  The interface.
 ```
 

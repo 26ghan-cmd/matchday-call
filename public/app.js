@@ -75,6 +75,9 @@ $('#joinForm').addEventListener('submit', async (e) => {
   history.replaceState(null, '', '?room=' + encodeURIComponent(room));
 
   audioCtx = new (window.AudioContext || window.webkitAudioContext)(); // needs a click to start
+  audioCtx.resume?.();
+  // Some browsers suspend audio again later; any click wakes it up.
+  document.addEventListener('pointerdown', () => { if (audioCtx.state !== 'running') audioCtx.resume(); });
   $('#roomLabel').textContent = room;
   $('#lobby').hidden = true;
   $('#call').hidden = false;
@@ -106,7 +109,9 @@ function addTile(id, name, isLocal = false) {
   tile.dataset.initial = (name || '?').trim().charAt(0).toUpperCase();
   tile.innerHTML =
     '<video autoplay playsinline></video>' +
+    '<canvas class="delayed-view"></canvas>' +
     '<div class="label">' +
+      '<span class="delay-badge" title="Held back so their reactions match your TV"></span>' +
       '<span class="mute-icon" title="Muted">🔇</span>' +
       '<span class="share-icon" title="Sharing their screen">🖥️</span>' +
       '<span class="name"></span>' +
@@ -114,9 +119,9 @@ function addTile(id, name, isLocal = false) {
     '<button class="pin-btn" title="Pin to the telly">📌</button>' +
     '<div class="float-layer"></div>';
   tile.querySelector('.name').textContent = name;
-  const video = tile.querySelector('video');
-  if (isLocal) video.muted = true; // never play your own mic back
-  else applySink(video);
+  // Video elements are always muted: you never hear your own mic, and other
+  // people's audio plays through Web Audio (see attachAudio) so it can be delayed.
+  tile.querySelector('video').muted = true;
   tile.querySelector('.pin-btn').onclick = (e) => { e.stopPropagation(); togglePin(id); };
   tile.ondblclick = () => togglePin(id);
   $('#tiles').appendChild(tile);
@@ -129,8 +134,65 @@ function setTileStream(id, stream) {
   if (!tile || !stream) return;
   const video = tile.querySelector('video');
   if (video.srcObject !== stream) video.srcObject = stream;
-  if (id !== 'me') video.volume = peers.get(id)?.volume ?? 1;
-  watchSpeaking(tile, stream);
+  if (id === 'me') watchSpeaking(tile, stream);
+  else attachAudio(id, stream);
+}
+
+// =====================================================================
+// Other people's audio: source -> (delay) -> volume -> speakers
+// The delay is only switched on by the spoiler shield (sync.js).
+// =====================================================================
+function attachAudio(id, stream) {
+  const peer = peers.get(id);
+  const track = stream.getAudioTracks()[0];
+  if (!peer || !track || !audioCtx) return;
+  if (peer.audio?.track === track) return;
+  try {
+    peer.audio?.source.disconnect();
+    const audio = peer.audio || { gain: audioCtx.createGain(), delay: null, seconds: 0 };
+    audio.track = track;
+    audio.source = audioCtx.createMediaStreamSource(new MediaStream([track]));
+    audio.gain.gain.value = peer.volume;
+    if (!peer.audio) audio.gain.connect(audioCtx.destination);
+    if (peer.pendingDelay != null) { audio.seconds = peer.pendingDelay; peer.pendingDelay = null; }
+    peer.audio = audio;
+    routeAudio(peer);
+    watchSpeaking(tileEl(id), null, audio.gain); // ring follows what you hear, delay included
+  } catch (err) {
+    console.warn('Web Audio unavailable, playing audio directly', err);
+    const video = tileEl(id)?.querySelector('video');
+    if (video) { video.muted = false; video.volume = peer.volume; }
+  }
+}
+
+function routeAudio(peer) {
+  const a = peer.audio;
+  if (!a?.source) return;
+  a.source.disconnect();
+  if (a.delay) a.delay.disconnect();
+  if (a.seconds > 0) {
+    // A delay line only exists while needed: each one holds minutes of audio.
+    if (!a.delay || a.delay._max < a.seconds) {
+      const max = Math.min(179, Math.ceil(a.seconds * 1.5) + 10);
+      a.delay = audioCtx.createDelay(max);
+      a.delay._max = max;
+    }
+    a.delay.delayTime.value = a.seconds;
+    a.source.connect(a.delay);
+    a.delay.connect(a.gain);
+  } else {
+    a.delay = null;
+    a.source.connect(a.gain);
+  }
+}
+
+// Hold back someone's audio by this many seconds (0 = live).
+function setAudioDelay(id, seconds) {
+  const peer = peers.get(id);
+  if (!peer?.audio) { if (peer) peer.pendingDelay = seconds; return; }
+  if (Math.abs((peer.audio.seconds || 0) - seconds) < 0.05) return;
+  peer.audio.seconds = seconds;
+  routeAudio(peer);
 }
 
 function removeTile(id) {
@@ -153,13 +215,14 @@ function applyTileState(id, state) {
 }
 
 // Green ring around whoever is talking (or shouting at the ref).
-function watchSpeaking(tile, stream) {
-  const track = stream?.getAudioTracks()[0];
+function watchSpeaking(tile, stream, node = null) {
+  const track = node || stream?.getAudioTracks()[0];
   if (!tile || !audioCtx || !track || tile._speakTrack === track) return;
   tile._speakTrack = track;
   const analyser = audioCtx.createAnalyser();
   analyser.fftSize = 512;
-  audioCtx.createMediaStreamSource(new MediaStream([track])).connect(analyser);
+  if (node) node.connect(analyser);
+  else audioCtx.createMediaStreamSource(new MediaStream([track])).connect(analyser);
   const buf = new Uint8Array(analyser.fftSize);
   const tick = () => {
     if (!tile.isConnected || tile._speakTrack !== track) return; // tile gone or device switched
@@ -207,6 +270,7 @@ function renderStage() {
     : `📌 ${displayName(src.id)}`;
   $('#unpinBtn').hidden = !pinnedId;
   document.querySelectorAll('.tile').forEach((t) => t.classList.toggle('pinned', t.dataset.id === pinnedId));
+  if (typeof syncStage === 'function') syncStage(src);
   renderPeople();
 }
 
@@ -341,7 +405,10 @@ function enqueue(peer, fn) {
 }
 
 function closePeer(id) {
-  peers.get(id)?.pc.close();
+  const peer = peers.get(id);
+  try { peer?.audio?.source?.disconnect(); peer?.audio?.delay?.disconnect(); peer?.audio?.gain.disconnect(); } catch {}
+  if (typeof onPeerClosed === 'function') onPeerClosed(id);
+  peer?.pc.close();
   peers.delete(id);
   removeTile(id);
   shareOrder = shareOrder.filter((x) => x !== id);
@@ -539,7 +606,16 @@ function updateBadge() {
   b.textContent = unread > 99 ? '99+' : unread;
 }
 
-socket.on('chat', (msg) => addChatMessage(msg));
+// Spoiler shield: messages and reactions from people whose TV is ahead of yours
+// arrive when your TV catches up (see sync.js).
+const heldFor = (id) => (typeof spoilerDelayFor === 'function' && id !== myId ? spoilerDelayFor(id) : 0);
+function afterShield(id, fn) {
+  const s = heldFor(id);
+  if (s > 0) setTimeout(fn, s * 1000);
+  else fn();
+}
+
+socket.on('chat', (msg) => afterShield(msg.id, () => addChatMessage(msg)));
 
 $('#chatForm').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -616,6 +692,10 @@ function renderPeople() {
     pin.onclick = () => togglePin(id);
     top.append(n, icons, pin);
     li.appendChild(top);
+    if (typeof syncLabelFor === 'function') {
+      const lag = syncLabelFor(id);
+      if (lag) li.appendChild(Object.assign(document.createElement('div'), { className: 'person-sync', textContent: lag }));
+    }
 
     if (id !== 'me') {
       const vol = document.createElement('label');
@@ -639,8 +719,9 @@ function setVolume(id, v) {
   const peer = peers.get(id);
   if (!peer) return;
   peer.volume = v;
+  if (peer.audio) peer.audio.gain.gain.value = v;
   const video = tileEl(id)?.querySelector('video');
-  if (video) video.volume = v;
+  if (video && !video.muted) video.volume = v; // only if Web Audio wasn't available
 }
 
 // =====================================================================
@@ -664,11 +745,13 @@ document.addEventListener('click', (e) => {
   if (!$('#reactionTray').contains(e.target)) $('#reactionTray').hidden = true;
 });
 
-socket.on('reaction', ({ id, emoji }) => {
+socket.on('reaction', ({ id, emoji }) => afterShield(id, () => showReaction(id, emoji)));
+
+function showReaction(id, emoji) {
   const tileId = id === myId ? 'me' : id;
   floatEmoji(tileEl(tileId)?.querySelector('.float-layer'), emoji);
   if (document.body.classList.contains('has-stage')) floatEmoji($('#stageFloat'), emoji, true);
-});
+}
 
 function floatEmoji(layer, emoji, big = false) {
   if (!layer) return;
@@ -683,7 +766,8 @@ function floatEmoji(layer, emoji, big = false) {
 // =====================================================================
 // Settings: pick mic, camera, speakers
 // =====================================================================
-const canPickSpeaker = 'setSinkId' in HTMLMediaElement.prototype;
+// Audio plays through Web Audio, so the speaker choice is set on the AudioContext.
+const canPickSpeaker = typeof AudioContext !== 'undefined' && 'setSinkId' in AudioContext.prototype;
 
 async function openSettings() {
   const devices = await navigator.mediaDevices.enumerateDevices();
@@ -733,17 +817,15 @@ async function switchDevice(kind, deviceId) {
   }
 }
 
-function applySink(video) {
-  if (speakerId && canPickSpeaker) video.setSinkId(speakerId).catch(() => {});
-}
 
 $('#settingsBtn').onclick = () => openSettings().catch((err) => toast('Settings unavailable: ' + err.message));
 $('#micSelect').onchange = (e) => switchDevice('audio', e.target.value);
 $('#camSelect').onchange = (e) => switchDevice('video', e.target.value);
 $('#speakerSelect').onchange = (e) => {
   speakerId = e.target.value;
-  document.querySelectorAll('.tile:not(.local) video').forEach(applySink);
-  toast('Speakers switched');
+  audioCtx?.setSinkId(speakerId === 'default' ? '' : speakerId)
+    .then(() => toast('Speakers switched'))
+    .catch((err) => toast("Couldn't switch speakers: " + err.message));
 };
 
 // =====================================================================
