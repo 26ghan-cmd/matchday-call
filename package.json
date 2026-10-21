@@ -1,0 +1,16 @@
+{
+  "name": "matchday-call",
+  "version": "0.1.0",
+  "description": "Video calls for watching Premier League matches with friends",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}

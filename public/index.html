@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Matchday Call</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="lobby">
+
+  <section id="lobby">
+    <h1>Matchday<span>Call</span></h1>
+    <p class="tag">Watch together. Celebrate together.</p>
+    <div class="preview-wrap">
+      <video id="preview" autoplay playsinline muted></video>
+    </div>
+    <form id="joinForm">
+      <label>Your name
+        <input id="name" maxlength="32" required placeholder="e.g. Sam" autocomplete="nickname">
+      </label>
+      <label>Room
+        <input id="room" maxlength="64" required>
+      </label>
+      <button type="submit" id="joinBtn">Join the room</button>
+      <p id="lobbyError" class="error" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="call" hidden>
+    <header class="bar">
+      <div class="room"><span class="dot"></span><span id="roomLabel"></span> · <span id="countLabel">1 fan</span></div>
+      <div class="mode-switch" role="group" aria-label="Layout">
+        <button data-mode="match" class="active">Match</button>
+        <button data-mode="halftime">Halftime</button>
+      </div>
+    </header>
+
+    <div id="pitch" class="pitch">
+      <p>Eyes on the telly.<br><small>Live score and match events will appear here.</small></p>
+    </div>
+
+    <div id="tiles" class="tiles" data-count="1"></div>
+
+    <footer class="controls">
+      <button id="micBtn" class="ctl on" title="Mute / unmute (M)">🎙️ <span>Mic on</span></button>
+      <button id="camBtn" class="ctl on" title="Camera on / off (V)">📷 <span>Camera on</span></button>
+      <button id="inviteBtn" class="ctl">🔗 <span>Copy invite</span></button>
+      <button id="leaveBtn" class="ctl danger">Leave</button>
+    </footer>
+  </section>
+
+  <div id="toast" class="toast" role="status"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
