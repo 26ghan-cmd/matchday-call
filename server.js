@@ -1,11 +1,13 @@
-// Matchday Call — signaling server.
-// Video and audio flow directly between browsers (WebRTC). This server only
-// introduces people in the same room and relays their connection details.
+// Matchday Call — server.
+// Video and audio flow directly between browsers (WebRTC). This server
+// introduces people in the same room, relays chat and reactions, and serves
+// live match data (score, stats, play-by-play, odds) to each room.
 
 const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
+const { MatchHub } = require('./match/hub');
 
 const PORT = process.env.PORT || 3000;
 const MAX_PEERS = 6; // mesh calls work well up to ~6 people
@@ -27,6 +29,30 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ---------- Match data ----------
+// Each room follows at most one match; the hub fetches each match once and we
+// send every update to all the rooms following it.
+const hub = new MatchHub();
+const roomMatch = new Map(); // room -> fixture id
+
+hub.on('update', (fixtureId, payload) => {
+  if (!payload) return;
+  hub.watchersOf(fixtureId).forEach((room) => io.to(room).emit('match', payload));
+});
+
+app.get('/api/fixtures', async (req, res) => {
+  res.set('Cache-Control', 'no-store').json(await hub.listFixtures());
+});
+
+function followMatch(room, fixtureId) {
+  const previous = roomMatch.get(room);
+  if (previous) hub.unwatch(previous, room);
+  if (!fixtureId) { roomMatch.delete(room); return null; }
+  const id = hub.watch(fixtureId, room);
+  roomMatch.set(room, id);
+  return id;
+}
 
 // ---------- ICE servers (STUN + TURN relay) ----------
 // TURN relays video when two people's networks block a direct connection.
@@ -123,7 +149,11 @@ io.on('connection', (socket) => {
     socket.data.name = name;
     socket.data.state = { ...DEFAULT_STATE };
     socket.join(room);
-    socket.emit('joined', { id: socket.id, peers, history: chatHistory.get(room) || [] });
+    const matchId = roomMatch.get(room) || null;
+    socket.emit('joined', {
+      id: socket.id, peers, history: chatHistory.get(room) || [],
+      match: matchId ? { fixtureId: matchId, data: hub.payload(matchId) } : null,
+    });
     socket.to(room).emit('peer-joined', { id: socket.id, name, state: socket.data.state });
   });
 
@@ -140,6 +170,23 @@ io.on('connection', (socket) => {
     if (list.length > CHAT_HISTORY) list.shift();
     chatHistory.set(room, list);
     io.to(room).emit('chat', msg);
+  });
+
+  // Anyone in the room can choose which match the room is following.
+  socket.on('select-match', async ({ fixtureId } = {}) => {
+    const room = socket.data.room;
+    if (!room || tooSoon(socket, 'select', 1500)) return;
+    let id = fixtureId == null ? null : String(fixtureId).slice(0, 32);
+    if (id && id !== 'demo') {
+      await hub.listFixtures(); // make sure the fixture list is loaded
+      if (!socket.connected || socket.data.room !== room) return;
+      if (!hub.isKnownFixture(id)) {
+        socket.emit('match-error', { message: "Couldn't find that match." });
+        return;
+      }
+    }
+    id = followMatch(room, id);
+    io.to(room).emit('match-selected', { fixtureId: id, by: socket.data.name, data: id ? hub.payload(id) : null });
   });
 
   // Quick emoji reactions.
@@ -167,7 +214,10 @@ io.on('connection', (socket) => {
     const room = socket.data.room;
     if (!room) return;
     socket.to(room).emit('peer-left', { id: socket.id });
-    if (!io.sockets.adapter.rooms.get(room)) chatHistory.delete(room);
+    if (!io.sockets.adapter.rooms.get(room)) {
+      chatHistory.delete(room);
+      followMatch(room, null); // stop fetching data nobody is watching
+    }
   });
 });
 
@@ -181,4 +231,10 @@ server.listen(PORT, () => {
   console.log(provider
     ? `TURN relay: ${provider}`
     : 'TURN relay: not configured (some friends may fail to connect; see README)');
+  console.log(env.API_FOOTBALL_KEY
+    ? 'Match data: API-Football'
+    : 'Match data: demo only (set API_FOOTBALL_KEY for live Premier League data)');
+  console.log(env.ANTHROPIC_API_KEY
+    ? 'Match analysis: Claude'
+    : 'Match analysis: stats-based (set ANTHROPIC_API_KEY for AI-written analysis)');
 });

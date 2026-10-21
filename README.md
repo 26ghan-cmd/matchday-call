@@ -23,8 +23,12 @@ to avoid feedback.
 ## What's in it
 
 - **Rooms by link:** share `?room=your-room-name` and up to 6 people can join.
-- **The telly:** the big area at the top shows a shared screen or whoever you've
-  pinned. Full-screen button included.
+- **Match centre:** the room picks a Premier League match (or the demo match) and
+  everyone sees the live score, stats, written play-by-play with analysis, live
+  odds and lineups. It fills the telly when nothing is shared or pinned, and is
+  always available from the scorebug in the top bar or the **Match** tab.
+- **The telly:** the big area at the top shows the match centre, a shared screen,
+  or whoever you've pinned. Full-screen button included.
 - **Match mode:** a compact strip of faces under the telly.
 - **Halftime mode:** a big grid of faces, or telly on the left and faces on the
   right when something is on the telly.
@@ -41,8 +45,10 @@ to avoid feedback.
 - **Settings:** choose microphone, camera and speakers (speaker choice works in
   Chrome and Edge).
 - **Talking ring:** a green outline around whoever is speaking.
+- **Spoiler delay:** in Settings, hold back the match data by 10–90 seconds so the
+  score never changes before your TV shows the goal.
 - Keyboard shortcuts: **M** mic, **V** camera, **S** share, **C** chat,
-  **H** layout, **1–6** reactions, **Esc** close panel.
+  **G** match centre, **H** layout, **1–6** reactions, **Esc** close panel.
 - Echo cancellation and noise suppression are on, to keep TV commentary out of the call.
 
 ## How it works
@@ -51,11 +57,44 @@ to avoid feedback.
 server.js        Introduces people in the same room and relays connection details.
                  It never touches video.
                  Also relays chat (keeping recent history per room) and reactions.
+match/hub.js     Follows each match a room is watching. Data is fetched once per
+                 match and shared by every room, so usage doesn't grow with users.
+match/api-football.js  Live Premier League data and odds from API-Football.
+match/demo.js    The demo match: fictional clubs, simulated play, modelled odds.
+match/feed.js    Turns data changes into play-by-play lines and stats-based analysis.
+match/ai.js      Optional AI-written analysis (Claude).
 public/app.js    WebRTC: every browser connects directly to every other (a "mesh").
                  Each connection has three fixed slots (mic, camera, screen), so
                  sharing or switching devices never interrupts the call.
+public/match.js  The match centre interface and the spoiler delay.
 public/*.html/css  The interface.
 ```
+
+## Match data setup
+
+Without any keys, the match centre offers the **demo match** only. Add these
+environment variables on your host (Render: your service → Environment):
+
+| Variable | What it does |
+|---|---|
+| `API_FOOTBALL_KEY` | Live Premier League fixtures, scores, stats, events, lineups and odds from [API-Football](https://www.api-football.com/pricing). The free plan (100 requests/day, limited seasons) isn't enough for live matches; the Pro plan ($19/month, 7,500/day) is. |
+| `ANTHROPIC_API_KEY` | Optional. Analysis lines written by Claude instead of the built-in stats-based ones. Costs a few cents per match. Get a key at console.anthropic.com. |
+
+Optional tuning:
+
+| Variable | Default | |
+|---|---|---|
+| `LIVE_POLL_SECONDS` | 15 | How often live match data is refreshed |
+| `ODDS_POLL_SECONDS` | 30 | How often live odds are refreshed |
+| `PL_SEASON` | automatic | Season year, e.g. 2026 for 2026/27 |
+| `DEMO_SECONDS_PER_MINUTE` | 4 | Demo match speed (4 → a full match takes about 7 minutes) |
+| `ANTHROPIC_MODEL` | claude-haiku-5-5 | Model used for analysis |
+
+Each live match uses about 700 API-Football requests (2 hours of updates), however
+many rooms are watching it. The server slows down automatically if the daily
+allowance runs low. The play-by-play is written from the data feed (goals, cards,
+subs, VAR, shots, saves, corners), so it describes what the data shows rather
+than every pass.
 
 ## Calling friends in other places
 

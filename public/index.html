@@ -31,6 +31,7 @@
   <section id="call" hidden>
     <header class="bar">
       <div class="room"><span class="dot"></span><span id="roomLabel"></span></div>
+      <button id="scorebug" class="scorebug" hidden title="Match centre"></button>
       <div class="bar-right">
         <button id="countBtn" class="count" title="People in the room">👥 <span id="countLabel">1</span></button>
         <div class="mode-switch" role="group" aria-label="Layout">
@@ -44,8 +45,61 @@
       <div class="content">
         <!-- The "telly": shows a shared screen or whoever is pinned -->
         <div id="pitch" class="pitch">
-          <div class="stage-empty">
-            <p>Eyes on the telly.<br><small>Pin someone or share your screen to show it here.</small></p>
+          <!-- When nothing is shared or pinned, the telly shows the match centre -->
+          <div id="stageMatchHost" class="stage-empty">
+            <div id="matchCentre" class="mc">
+              <!-- Choosing a match -->
+              <div id="mcPick" class="mc-pick">
+                <div class="mc-pick-head">
+                  <h3>What are you watching?</h3>
+                  <button id="mcPickBack" class="small-btn" hidden>Back to the match</button>
+                </div>
+                <p id="mcNote" class="mc-note"></p>
+                <div id="mcFixtures" class="mc-fixtures"></div>
+              </div>
+
+              <!-- Following a match -->
+              <div id="mcLive" class="mc-live" hidden>
+                <div class="mc-score">
+                  <div class="mc-team home">
+                    <span id="mcHomeBadge" class="mc-badge"></span>
+                    <span id="mcHomeName" class="mc-name"></span>
+                    <ul id="mcHomeScorers" class="mc-scorers"></ul>
+                  </div>
+                  <div class="mc-mid">
+                    <div class="mc-goals"><span id="mcHomeGoals">0</span><span class="sep">–</span><span id="mcAwayGoals">0</span></div>
+                    <div id="mcClock" class="mc-clock"></div>
+                    <div id="mcMeta" class="mc-meta"></div>
+                  </div>
+                  <div class="mc-team away">
+                    <span id="mcAwayBadge" class="mc-badge"></span>
+                    <span id="mcAwayName" class="mc-name"></span>
+                    <ul id="mcAwayScorers" class="mc-scorers"></ul>
+                  </div>
+                </div>
+                <div class="mc-toolbar">
+                  <div class="mc-tabs" role="tablist">
+                    <button data-mc="stats" class="active" role="tab">Stats</button>
+                    <button data-mc="pbp" role="tab">Play-by-play</button>
+                    <button data-mc="odds" role="tab">Odds</button>
+                    <button data-mc="lineups" role="tab">Lineups</button>
+                  </div>
+                  <div class="mc-tools">
+                    <button id="mcDelay" class="mc-chip" hidden title="Match data is delayed to avoid spoilers"></button>
+                    <button id="mcChange" class="small-btn">Change match</button>
+                  </div>
+                </div>
+                <div class="mc-body">
+                  <div class="mc-pane" data-pane="stats"><div id="mcStats" class="mc-stats"></div></div>
+                  <div class="mc-pane" data-pane="pbp">
+                    <h4 class="mc-pane-title">Play-by-play</h4>
+                    <ol id="mcFeed" class="mc-feed"></ol>
+                  </div>
+                  <div class="mc-pane" data-pane="odds"><div id="mcOdds" class="mc-odds"></div></div>
+                  <div class="mc-pane" data-pane="lineups"><div id="mcLineups" class="mc-lineups"></div></div>
+                </div>
+              </div>
+            </div>
           </div>
           <video id="stageVideo" autoplay playsinline muted></video>
           <div id="stageFloat" class="float-layer"></div>
@@ -63,6 +117,7 @@
         <div class="panel-head">
           <div class="tabs" role="tablist">
             <button class="tab active" data-tab="chat" role="tab">Chat</button>
+            <button class="tab" data-tab="match" role="tab">Match</button>
             <button class="tab" data-tab="people" role="tab">People</button>
           </div>
           <button id="closePanel" class="icon-btn" title="Close">✕</button>
@@ -74,6 +129,7 @@
             <button type="submit">Send</button>
           </form>
         </div>
+        <div id="matchPane" class="pane match-pane" hidden></div>
         <div id="peoplePane" class="pane" hidden>
           <ul id="peopleList" class="people-list"></ul>
         </div>
@@ -102,7 +158,19 @@
       <label>Microphone <select id="micSelect"></select></label>
       <label>Camera <select id="camSelect"></select></label>
       <label id="speakerRow">Speakers <select id="speakerSelect"></select></label>
-      <p class="hint">Shortcuts: M mic · V camera · S share · C chat · H layout · 1–6 reactions</p>
+      <label>Delay match data
+        <select id="delaySelect">
+          <option value="0">No delay</option>
+          <option value="10">10 seconds</option>
+          <option value="20">20 seconds</option>
+          <option value="30">30 seconds</option>
+          <option value="45">45 seconds</option>
+          <option value="60">1 minute</option>
+          <option value="90">1.5 minutes</option>
+        </select>
+        <small class="hint">Score and play-by-play can arrive before your TV shows it. Delay them so nothing gets spoiled.</small>
+      </label>
+      <p class="hint">Shortcuts: M mic · V camera · S share · C chat · G match centre · H layout · 1–6 reactions</p>
       <button value="close">Done</button>
     </form>
   </dialog>
@@ -111,5 +179,6 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="app.js"></script>
+  <script src="match.js"></script>
 </body>
 </html>

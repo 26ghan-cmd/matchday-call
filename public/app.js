@@ -561,19 +561,22 @@ function openPanel(tab) {
 function closePanel() {
   $('#panel').hidden = true;
   document.body.classList.remove('panel-open');
+  if (typeof placeMatchCentre === 'function') placeMatchCentre();
 }
 function setTab(tab) {
   activeTab = tab;
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
   $('#chatPane').hidden = tab !== 'chat';
+  $('#matchPane').hidden = tab !== 'match';
   $('#peoplePane').hidden = tab !== 'people';
+  if (typeof placeMatchCentre === 'function') placeMatchCentre();
   if (tab === 'chat') {
     unread = 0;
     updateBadge();
     const list = $('#chatList');
     list.scrollTop = list.scrollHeight;
     if (window.matchMedia('(pointer: fine)').matches) $('#chatInput').focus();
-  } else {
+  } else if (tab === 'people') {
     renderPeople();
   }
 }
@@ -787,6 +790,7 @@ document.addEventListener('keydown', (e) => {
   else if (k === 's' && canShare) screenTrack ? stopShare() : startShare();
   else if (k === 'h') setMode(document.body.classList.contains('match') ? 'halftime' : 'match');
   else if (k === 'c') { e.preventDefault(); openPanel('chat'); }
+  else if (k === 'g' && typeof showMatchCentre === 'function') showMatchCentre();
   else if (k === 'escape') closePanel();
   else if (/^[1-6]$/.test(k)) sendReaction(REACTIONS[Number(k) - 1]);
 });
