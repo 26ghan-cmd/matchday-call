@@ -28,7 +28,9 @@ to avoid feedback.
 - **Halftime mode:** a big grid so you can actually chat.
 - **Talking ring:** a green outline around whoever is speaking.
 - **Mute and camera toggles** that show up for everyone.
-- Keyboard shortcuts: **M** mic, **V** camera, **H** switch Match/Halftime.
+- **Screen sharing** (desktop browsers): your screen replaces your camera for
+  everyone until you stop. Shows up as a larger tile. Not available on phones.
+- Keyboard shortcuts: **M** mic, **V** camera, **S** share screen, **H** switch Match/Halftime.
 - Echo cancellation and noise suppression are on, to keep TV commentary out of the call.
 
 ## How it works

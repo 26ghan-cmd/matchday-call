@@ -9,7 +9,11 @@ const $ = (s) => document.querySelector(s);
 const socket = io({ autoConnect: false });
 const peers = new Map(); // socketId -> { pc, name, queue, pending }
 let localStream = null;
+let screenTrack = null; // set while sharing your screen
 let audioCtx = null;
+
+const cameraTrack = () => localStream.getVideoTracks()[0];
+const outgoingVideo = () => screenTrack || cameraTrack();
 let myName = '';
 
 // ---------- Lobby ----------
@@ -114,7 +118,9 @@ function createPeer(id, name, initiator) {
   const peer = { pc, name, queue: Promise.resolve(), pending: [] };
   peers.set(id, peer);
 
-  localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+  // Send mic + whatever video we're currently showing (camera or shared screen).
+  localStream.getAudioTracks().forEach((t) => pc.addTrack(t, localStream));
+  if (outgoingVideo()) pc.addTrack(outgoingVideo(), localStream);
   pc.onicecandidate = (e) => {
     if (e.candidate) socket.emit('signal', { to: id, data: { candidate: e.candidate } });
   };
@@ -181,11 +187,14 @@ socket.on('signal', ({ from, name, data }) => {
   });
 });
 
-socket.on('peer-state', ({ id, mic, cam }) => {
+socket.on('peer-state', ({ id, mic, cam, screen }) => {
   const tile = document.getElementById('tile-' + id);
   if (!tile) return;
+  const wasSharing = tile.classList.contains('sharing');
   tile.classList.toggle('muted', !mic);
-  tile.classList.toggle('cam-off', !cam);
+  tile.classList.toggle('cam-off', !cam && !screen);
+  tile.classList.toggle('sharing', !!screen);
+  if (screen && !wasSharing) toast(`${peers.get(id)?.name || 'Someone'} is sharing their screen`);
 });
 
 socket.on('peer-left', ({ id }) => {
@@ -206,14 +215,19 @@ socket.on('disconnect', (reason) => {
 // ---------- Controls ----------
 function sendState() {
   const mic = localStream.getAudioTracks()[0]?.enabled ?? false;
-  const cam = localStream.getVideoTracks()[0]?.enabled ?? false;
-  socket.emit('state', { mic, cam });
+  const cam = cameraTrack()?.enabled ?? false;
+  const screen = !!screenTrack;
+  socket.emit('state', { mic, cam, screen });
 
   const me = document.getElementById('tile-me');
   me?.classList.toggle('muted', !mic);
-  me?.classList.toggle('cam-off', !cam);
+  me?.classList.toggle('cam-off', !cam && !screen);
+  me?.classList.toggle('sharing', screen);
   setBtn('#micBtn', mic, 'Mic on', 'Muted');
   setBtn('#camBtn', cam, 'Camera on', 'Camera off');
+  const shareBtn = $('#shareBtn');
+  shareBtn.classList.toggle('sharing', screen);
+  shareBtn.querySelector('span').textContent = screen ? 'Stop sharing' : 'Share screen';
 }
 
 function setBtn(sel, on, onText, offText) {
@@ -232,6 +246,47 @@ function toggleTrack(kind) {
 $('#micBtn').onclick = () => toggleTrack('audio');
 $('#camBtn').onclick = () => toggleTrack('video');
 
+// ---------- Screen sharing ----------
+// Swaps the video we send to everyone from camera to screen (no reconnect needed).
+async function setOutgoingVideo(track) {
+  await Promise.all([...peers.values()].map(({ pc }) => {
+    const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
+    if (sender) return sender.replaceTrack(track).catch(console.error);
+  }));
+  const meVideo = document.querySelector('#tile-me video');
+  if (meVideo) meVideo.srcObject = track === cameraTrack() ? localStream : new MediaStream([track]);
+}
+
+async function startShare() {
+  try {
+    const display = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: 15, max: 30 } },
+      audio: false, // the call already has your mic; shared audio would echo the TV
+    });
+    screenTrack = display.getVideoTracks()[0];
+    screenTrack.contentHint = 'detail'; // keep text (stats, tables) sharp
+    screenTrack.onended = stopShare;    // browser's own "Stop sharing" bar
+    await setOutgoingVideo(screenTrack);
+    sendState();
+  } catch (err) {
+    if (err.name !== 'NotAllowedError') toast('Screen sharing failed: ' + err.message);
+  }
+}
+
+async function stopShare() {
+  if (!screenTrack) return;
+  const t = screenTrack;
+  screenTrack = null;
+  t.onended = null;
+  t.stop();
+  await setOutgoingVideo(cameraTrack());
+  sendState();
+}
+
+const canShare = !!navigator.mediaDevices?.getDisplayMedia;
+if (!canShare) $('#shareBtn').hidden = true; // phones don't support it
+$('#shareBtn').onclick = () => (screenTrack ? stopShare() : startShare());
+
 $('#inviteBtn').onclick = async () => {
   try {
     await navigator.clipboard.writeText(location.href);
@@ -244,6 +299,7 @@ $('#inviteBtn').onclick = async () => {
 $('#leaveBtn').onclick = () => {
   socket.disconnect();
   [...peers.keys()].forEach(closePeer);
+  screenTrack?.stop();
   localStream.getTracks().forEach((t) => t.stop());
   location.reload();
 };
@@ -262,6 +318,7 @@ document.addEventListener('keydown', (e) => {
   if ($('#call').hidden || e.target.tagName === 'INPUT') return;
   if (e.key === 'm' || e.key === 'M') toggleTrack('audio');
   if (e.key === 'v' || e.key === 'V') toggleTrack('video');
+  if ((e.key === 's' || e.key === 'S') && canShare) screenTrack ? stopShare() : startShare();
   if (e.key === 'h' || e.key === 'H') setMode(document.body.className === 'match' ? 'halftime' : 'match');
 });
 

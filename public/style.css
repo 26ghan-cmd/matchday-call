@@ -148,6 +148,13 @@ input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
   font-size: 12px; max-width: calc(100% - 16px);
 }
 .label .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Screen share: bigger tile, whole screen visible, never mirrored */
+.tile.sharing { width: 420px; background: #000; }
+.tile.sharing video { object-fit: contain; transform: none !important; }
+.tile.sharing .name::after { content: " · sharing"; color: var(--accent); }
+body.halftime .tile.sharing { grid-column: span 2; }
+#shareBtn.sharing { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+
 .mute-icon { display: none; }
 .tile.muted .mute-icon { display: inline; }
 
@@ -199,6 +206,8 @@ body.halftime .tiles[data-count="2"] { grid-template-columns: repeat(auto-fit, m
 
 @media (max-width: 600px) {
   .tile { width: 150px; }
+  .tile.sharing { width: 280px; }
+  body.halftime .tile.sharing { grid-column: 1 / -1; }
   .ctl span { display: none; }
   .ctl.danger span, .ctl.danger { font-size: 14px; }
   body.halftime .tiles { grid-template-columns: 1fr 1fr; }

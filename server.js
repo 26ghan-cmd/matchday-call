@@ -46,10 +46,12 @@ io.on('connection', (socket) => {
     target.emit('signal', { from: socket.id, name: socket.data.name, data });
   });
 
-  // Mic/camera on-off status, so others can show a muted icon.
-  socket.on('state', ({ mic, cam } = {}) => {
+  // Mic/camera/screen-share status, so others can show icons and size tiles.
+  socket.on('state', ({ mic, cam, screen } = {}) => {
     if (!socket.data.room) return;
-    socket.to(socket.data.room).emit('peer-state', { id: socket.id, mic: !!mic, cam: !!cam });
+    socket.to(socket.data.room).emit('peer-state', {
+      id: socket.id, mic: !!mic, cam: !!cam, screen: !!screen,
+    });
   });
 
   socket.on('disconnect', () => {
