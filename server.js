@@ -16,6 +16,78 @@ const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ---------- ICE servers (STUN + TURN relay) ----------
+// TURN relays video when two people's networks block a direct connection.
+// Configure ONE provider with environment variables (e.g. on Render):
+//   Metered:    METERED_APP_NAME, METERED_API_KEY
+//   Cloudflare: CLOUDFLARE_TURN_KEY_ID, CLOUDFLARE_TURN_API_TOKEN
+//   Any other:  TURN_URLS (comma-separated), TURN_USERNAME, TURN_CREDENTIAL
+const FALLBACK_ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
+let iceCache = { servers: null, expires: 0 };
+
+async function fetchIceServers() {
+  const env = process.env;
+
+  if (env.CLOUDFLARE_TURN_KEY_ID && env.CLOUDFLARE_TURN_API_TOKEN) {
+    const res = await fetch(
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${env.CLOUDFLARE_TURN_KEY_ID}/credentials/generate-ice-servers`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.CLOUDFLARE_TURN_API_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ttl: 86400 }),
+      }
+    );
+    if (!res.ok) throw new Error(`Cloudflare TURN returned ${res.status}`);
+    const { iceServers } = await res.json();
+    // Port 53 URLs tend to time out in browsers; drop them.
+    const list = (Array.isArray(iceServers) ? iceServers : [iceServers]).map((s) => ({
+      ...s,
+      urls: [].concat(s.urls).filter((u) => !/:53(\?|$)/.test(u)),
+    }));
+    return { servers: list, ttlMs: 12 * 3600e3 };
+  }
+
+  if (env.METERED_APP_NAME && env.METERED_API_KEY) {
+    const res = await fetch(
+      `https://${env.METERED_APP_NAME}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(env.METERED_API_KEY)}`
+    );
+    if (!res.ok) throw new Error(`Metered TURN returned ${res.status}`);
+    return { servers: await res.json(), ttlMs: 3600e3 };
+  }
+
+  if (env.TURN_URLS && env.TURN_USERNAME && env.TURN_CREDENTIAL) {
+    return {
+      servers: [
+        ...FALLBACK_ICE,
+        {
+          urls: env.TURN_URLS.split(',').map((u) => u.trim()).filter(Boolean),
+          username: env.TURN_USERNAME,
+          credential: env.TURN_CREDENTIAL,
+        },
+      ],
+      ttlMs: 24 * 3600e3,
+    };
+  }
+
+  return { servers: FALLBACK_ICE, ttlMs: 24 * 3600e3 };
+}
+
+app.get('/ice', async (req, res) => {
+  try {
+    if (!iceCache.servers || Date.now() > iceCache.expires) {
+      const { servers, ttlMs } = await fetchIceServers();
+      iceCache = { servers, expires: Date.now() + ttlMs };
+    }
+    res.set('Cache-Control', 'no-store').json(iceCache.servers);
+  } catch (err) {
+    console.error('TURN setup failed:', err.message);
+    res.json(FALLBACK_ICE); // the call still works for people on friendly networks
+  }
+});
+
 io.on('connection', (socket) => {
   socket.on('join', ({ room, name } = {}) => {
     room = String(room || '').trim().slice(0, 64);
@@ -61,4 +133,12 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`Matchday Call running at http://localhost:${PORT}`);
+  const env = process.env;
+  const provider =
+    env.CLOUDFLARE_TURN_KEY_ID ? 'Cloudflare' :
+    env.METERED_APP_NAME ? 'Metered' :
+    env.TURN_URLS ? 'custom TURN' : null;
+  console.log(provider
+    ? `TURN relay: ${provider}`
+    : 'TURN relay: not configured (some friends may fail to connect; see README)');
 });

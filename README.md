@@ -51,17 +51,20 @@ public/*.html/css  The interface.
    Browsers only allow camera access on https (or localhost).
 2. **Proper hosting:** deploy to any Node host with websockets (Render, Railway,
    Fly.io). They provide https automatically.
-3. **TURN server:** about 1 in 10 connections (strict office or mobile networks)
-   can't connect directly and need a relay. Get TURN credentials from a provider
-   such as Twilio, Metered or Cloudflare, or self-host `coturn`, then add it to
-   `ICE_SERVERS` at the top of `public/app.js`:
+3. **TURN relay (needed for most real calls):** many home, office and mobile
+   networks block direct connections, so both people see "Couldn't reach…".
+   A TURN server relays the video instead. Set **one** of these as environment
+   variables on your host (Render: your service → Environment). Never put the
+   keys in the code. The server hands browsers short-lived credentials at `/ice`.
 
-   ```js
-   const ICE_SERVERS = [
-     { urls: 'stun:stun.l.google.com:19302' },
-     { urls: 'turn:your.turn.host:3478', username: 'USER', credential: 'PASS' },
-   ];
-   ```
+   | Provider | Variables | Cost |
+   |---|---|---|
+   | [Metered](https://www.metered.ca/stun-turn) | `METERED_APP_NAME`, `METERED_API_KEY` | Free 500 MB/month: fine for testing, not a full match |
+   | [Cloudflare](https://developers.cloudflare.com/calls/turn/) | `CLOUDFLARE_TURN_KEY_ID`, `CLOUDFLARE_TURN_API_TOKEN` | $0.05/GB, a few cents per match |
+   | Any other / self-hosted coturn | `TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL` | Varies |
+
+   On startup the server log says which relay it's using, e.g. `TURN relay: Metered`.
+   To check from a browser, open `https://your-app/ice`: you should see `turn:` URLs.
 
 ## Limits and next steps
 

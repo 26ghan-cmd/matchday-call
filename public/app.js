@@ -1,9 +1,14 @@
 // Matchday Call — browser client.
 // Each person connects directly to every other person in the room (a "mesh").
 
-// STUN lets browsers discover their public address. For friends behind strict
-// firewalls/mobile networks you'll also want a TURN server — see README.
-const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+// STUN/TURN servers come from our own server (/ice), which keeps TURN keys secret.
+// TURN relays video when two networks can't connect directly. See README.
+let ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
+const iceReady = fetch('/ice')
+  .then((r) => (r.ok ? r.json() : null))
+  .then((list) => { if (Array.isArray(list) && list.length) ICE_SERVERS = list; })
+  .catch(() => {});
+const hasTurn = () => ICE_SERVERS.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)));
 
 const $ = (s) => document.querySelector(s);
 const socket = io({ autoConnect: false });
@@ -38,9 +43,10 @@ async function startPreview() {
 }
 startPreview();
 
-$('#joinForm').addEventListener('submit', (e) => {
+$('#joinForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!localStream) return;
+  await iceReady; // make sure we have relay servers before calling anyone
   myName = $('#name').value.trim() || 'Fan';
   const room = $('#room').value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 64);
   try { localStorage.setItem('mc-name', myName); } catch {}
@@ -129,7 +135,9 @@ function createPeer(id, name, initiator) {
     const tile = document.getElementById('tile-' + id);
     if (tile) tile.dataset.state = pc.connectionState;
     if (pc.connectionState === 'failed') {
-      toast(`Couldn't reach ${name}. Their network may need a TURN server.`);
+      toast(hasTurn()
+        ? `Couldn't reach ${name}. Try reloading both pages.`
+        : `Couldn't reach ${name}. This app needs a TURN relay set up (see README).`);
     }
   };
 
