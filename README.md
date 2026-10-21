@@ -23,14 +23,26 @@ to avoid feedback.
 ## What's in it
 
 - **Rooms by link:** share `?room=your-room-name` and up to 6 people can join.
-- **Match mode:** a compact strip of faces along the bottom, with space above
-  reserved for the live score and match events (next step).
-- **Halftime mode:** a big grid so you can actually chat.
+- **The telly:** the big area at the top shows a shared screen or whoever you've
+  pinned. Full-screen button included.
+- **Match mode:** a compact strip of faces under the telly.
+- **Halftime mode:** a big grid of faces, or telly on the left and faces on the
+  right when something is on the telly.
+- **Screen sharing** (desktop browsers): your screen goes on everyone's telly and
+  your camera stays visible in your tile. If several people share, the most recent
+  one shows; pin someone to choose. Not available on phones.
+- **Pinning:** 📌 on any tile (or double-click it) puts that person on your telly.
+  Only you see your pins.
+- **Chat:** side panel with history for late joiners, clickable links and an
+  unread badge. History is forgotten when everyone leaves.
+- **People list:** everyone's mic/camera/sharing status, pin buttons, and a
+  volume slider per person.
+- **Reactions:** ⚽ 🔥 😱 👏 😂 🟥 float over your tile and the telly.
+- **Settings:** choose microphone, camera and speakers (speaker choice works in
+  Chrome and Edge).
 - **Talking ring:** a green outline around whoever is speaking.
-- **Mute and camera toggles** that show up for everyone.
-- **Screen sharing** (desktop browsers): your screen replaces your camera for
-  everyone until you stop. Shows up as a larger tile. Not available on phones.
-- Keyboard shortcuts: **M** mic, **V** camera, **S** share screen, **H** switch Match/Halftime.
+- Keyboard shortcuts: **M** mic, **V** camera, **S** share, **C** chat,
+  **H** layout, **1–6** reactions, **Esc** close panel.
 - Echo cancellation and noise suppression are on, to keep TV commentary out of the call.
 
 ## How it works
@@ -38,7 +50,10 @@ to avoid feedback.
 ```
 server.js        Introduces people in the same room and relays connection details.
                  It never touches video.
+                 Also relays chat (keeping recent history per room) and reactions.
 public/app.js    WebRTC: every browser connects directly to every other (a "mesh").
+                 Each connection has three fixed slots (mic, camera, screen), so
+                 sharing or switching devices never interrupts the call.
 public/*.html/css  The interface.
 ```
 

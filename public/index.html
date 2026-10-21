@@ -8,6 +8,7 @@
 </head>
 <body class="lobby">
 
+  <!-- ===== Lobby ===== -->
   <section id="lobby">
     <h1>Matchday<span>Call</span></h1>
     <p class="tag">Watch together. Celebrate together.</p>
@@ -26,29 +27,85 @@
     </form>
   </section>
 
+  <!-- ===== Call ===== -->
   <section id="call" hidden>
     <header class="bar">
-      <div class="room"><span class="dot"></span><span id="roomLabel"></span> · <span id="countLabel">1 fan</span></div>
-      <div class="mode-switch" role="group" aria-label="Layout">
-        <button data-mode="match" class="active">Match</button>
-        <button data-mode="halftime">Halftime</button>
+      <div class="room"><span class="dot"></span><span id="roomLabel"></span></div>
+      <div class="bar-right">
+        <button id="countBtn" class="count" title="People in the room">👥 <span id="countLabel">1</span></button>
+        <div class="mode-switch" role="group" aria-label="Layout">
+          <button data-mode="match" class="active" title="Compact faces, eyes on the TV">Match</button>
+          <button data-mode="halftime" title="Big faces, time to chat">Halftime</button>
+        </div>
       </div>
     </header>
 
-    <div id="pitch" class="pitch">
-      <p>Eyes on the telly.<br><small>Live score and match events will appear here.</small></p>
-    </div>
+    <div class="main">
+      <div class="content">
+        <!-- The "telly": shows a shared screen or whoever is pinned -->
+        <div id="pitch" class="pitch">
+          <div class="stage-empty">
+            <p>Eyes on the telly.<br><small>Pin someone or share your screen to show it here.</small></p>
+          </div>
+          <video id="stageVideo" autoplay playsinline muted></video>
+          <div id="stageFloat" class="float-layer"></div>
+          <div class="stage-bar">
+            <span id="stageLabel"></span>
+            <button id="unpinBtn" hidden>Unpin</button>
+            <button id="fullBtn" title="Full screen">⛶</button>
+          </div>
+        </div>
+        <div id="tiles" class="tiles" data-count="1"></div>
+      </div>
 
-    <div id="tiles" class="tiles" data-count="1"></div>
+      <!-- Side panel: chat + people -->
+      <aside id="panel" hidden>
+        <div class="panel-head">
+          <div class="tabs" role="tablist">
+            <button class="tab active" data-tab="chat" role="tab">Chat</button>
+            <button class="tab" data-tab="people" role="tab">People</button>
+          </div>
+          <button id="closePanel" class="icon-btn" title="Close">✕</button>
+        </div>
+        <div id="chatPane" class="pane">
+          <ul id="chatList" class="chat-list"></ul>
+          <form id="chatForm" class="chat-form">
+            <input id="chatInput" maxlength="500" placeholder="Message the room…" autocomplete="off">
+            <button type="submit">Send</button>
+          </form>
+        </div>
+        <div id="peoplePane" class="pane" hidden>
+          <ul id="peopleList" class="people-list"></ul>
+        </div>
+      </aside>
+    </div>
 
     <footer class="controls">
       <button id="micBtn" class="ctl on" title="Mute / unmute (M)">🎙️ <span>Mic on</span></button>
       <button id="camBtn" class="ctl on" title="Camera on / off (V)">📷 <span>Camera on</span></button>
       <button id="shareBtn" class="ctl" title="Share your screen (S)">🖥️ <span>Share screen</span></button>
-      <button id="inviteBtn" class="ctl">🔗 <span>Copy invite</span></button>
+      <div class="react-wrap">
+        <button id="reactBtn" class="ctl" title="Reactions (1-6)">⚽ <span>React</span></button>
+        <div id="reactionTray" class="reaction-tray" hidden></div>
+      </div>
+      <button id="chatBtn" class="ctl" title="Chat (C)">💬 <span>Chat</span><b id="unreadBadge" class="badge" hidden>0</b></button>
+      <button id="settingsBtn" class="ctl" title="Settings">⚙️ <span>Settings</span></button>
+      <button id="inviteBtn" class="ctl">🔗 <span>Invite</span></button>
       <button id="leaveBtn" class="ctl danger">Leave</button>
     </footer>
   </section>
+
+  <!-- ===== Settings ===== -->
+  <dialog id="settings">
+    <form method="dialog" class="settings-form">
+      <h2>Settings</h2>
+      <label>Microphone <select id="micSelect"></select></label>
+      <label>Camera <select id="camSelect"></select></label>
+      <label id="speakerRow">Speakers <select id="speakerSelect"></select></label>
+      <p class="hint">Shortcuts: M mic · V camera · S share · C chat · H layout · 1–6 reactions</p>
+      <button value="close">Done</button>
+    </form>
+  </dialog>
 
   <div id="toast" class="toast" role="status"></div>
 

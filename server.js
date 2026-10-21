@@ -9,6 +9,18 @@ const { Server } = require('socket.io');
 
 const PORT = process.env.PORT || 3000;
 const MAX_PEERS = 6; // mesh calls work well up to ~6 people
+const CHAT_HISTORY = 100; // messages kept per room for people who join late
+const REACTIONS = ['⚽', '🔥', '😱', '👏', '😂', '🟥'];
+const DEFAULT_STATE = { mic: true, cam: true, screen: false };
+const chatHistory = new Map(); // room -> [{ id, name, text, ts }]
+
+// Simple per-person rate limit so nobody can flood the room.
+function tooSoon(socket, key, ms) {
+  const now = Date.now();
+  const last = socket.data['last_' + key] || 0;
+  socket.data['last_' + key] = now;
+  return now - last < ms;
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -101,14 +113,40 @@ io.on('connection', (socket) => {
     }
 
     const peers = members
-      ? [...members].map((id) => ({ id, name: io.sockets.sockets.get(id)?.data.name || 'Fan' }))
+      ? [...members].map((id) => {
+          const s = io.sockets.sockets.get(id);
+          return { id, name: s?.data.name || 'Fan', state: s?.data.state || DEFAULT_STATE };
+        })
       : [];
 
     socket.data.room = room;
     socket.data.name = name;
+    socket.data.state = { ...DEFAULT_STATE };
     socket.join(room);
-    socket.emit('joined', { id: socket.id, peers });
-    socket.to(room).emit('peer-joined', { id: socket.id, name });
+    socket.emit('joined', { id: socket.id, peers, history: chatHistory.get(room) || [] });
+    socket.to(room).emit('peer-joined', { id: socket.id, name, state: socket.data.state });
+  });
+
+  // Text chat. The server keeps the last messages so late joiners can catch up;
+  // history is forgotten once the room empties.
+  socket.on('chat', ({ text } = {}) => {
+    const room = socket.data.room;
+    if (!room) return;
+    text = String(text || '').trim().slice(0, 500);
+    if (!text || tooSoon(socket, 'chat', 300)) return;
+    const msg = { id: socket.id, name: socket.data.name, text, ts: Date.now() };
+    const list = chatHistory.get(room) || [];
+    list.push(msg);
+    if (list.length > CHAT_HISTORY) list.shift();
+    chatHistory.set(room, list);
+    io.to(room).emit('chat', msg);
+  });
+
+  // Quick emoji reactions.
+  socket.on('reaction', ({ emoji } = {}) => {
+    const room = socket.data.room;
+    if (!room || !REACTIONS.includes(emoji) || tooSoon(socket, 'reaction', 250)) return;
+    io.to(room).emit('reaction', { id: socket.id, emoji });
   });
 
   // Relay WebRTC offers/answers/ICE candidates between two people in the same room.
@@ -121,13 +159,15 @@ io.on('connection', (socket) => {
   // Mic/camera/screen-share status, so others can show icons and size tiles.
   socket.on('state', ({ mic, cam, screen } = {}) => {
     if (!socket.data.room) return;
-    socket.to(socket.data.room).emit('peer-state', {
-      id: socket.id, mic: !!mic, cam: !!cam, screen: !!screen,
-    });
+    socket.data.state = { mic: !!mic, cam: !!cam, screen: !!screen };
+    socket.to(socket.data.room).emit('peer-state', { id: socket.id, ...socket.data.state });
   });
 
   socket.on('disconnect', () => {
-    if (socket.data.room) socket.to(socket.data.room).emit('peer-left', { id: socket.id });
+    const room = socket.data.room;
+    if (!room) return;
+    socket.to(room).emit('peer-left', { id: socket.id });
+    if (!io.sockets.adapter.rooms.get(room)) chatHistory.delete(room);
   });
 });
 
