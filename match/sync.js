@@ -27,7 +27,8 @@ function validTap({ half, clockSec, tapAt }, now = Date.now()) {
   const min = half === 1 ? 0 : HALF_SECONDS;
   const max = half === 1 ? 60 * 60 : 105 * 60; // allow for stoppage time
   if (clockSec < min || clockSec > max) return false;
-  return Math.abs(tapAt - now) < 10 * 60 * 1000; // within ten minutes of now
+  // Not in the future, and from this match (taps are re-sent after a reconnect).
+  return tapAt - now < 60 * 1000 && now - tapAt < 4 * 3600 * 1000;
 }
 
 const median = (xs) => {

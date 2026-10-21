@@ -23,6 +23,12 @@ to avoid feedback.
 ## What's in it
 
 - **Rooms by link:** share `?room=your-room-name` and up to 6 people can join.
+- **Joins with whatever works:** no webcam, or a camera busy in another app? You
+  join with audio only. No devices or permission blocked? You can still watch,
+  listen and chat.
+- **Recovers from dropouts:** after a Wi-Fi blip, laptop sleep or server restart
+  the app rejoins the room by itself (and re-sends your TV sync). Video links that
+  drop are restarted automatically.
 - **Match centre:** the room picks a Premier League match (or the demo match) and
   everyone sees the live score, stats, written play-by-play with analysis, live
   odds and lineups. It fills the telly when nothing is shared or pinned, and is
@@ -129,8 +135,10 @@ than every pass.
    | [Cloudflare](https://developers.cloudflare.com/calls/turn/) | `CLOUDFLARE_TURN_KEY_ID`, `CLOUDFLARE_TURN_API_TOKEN` | $0.05/GB, a few cents per match |
    | Any other / self-hosted coturn | `TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL` | Varies |
 
-   On startup the server log says which relay it's using, e.g. `TURN relay: Metered`.
-   To check from a browser, open `https://your-app/ice`: you should see `turn:` URLs.
+   On startup the server log says which relay it's using, e.g. `TURN relay: Cloudflare`.
+   You can also open `https://your-app/ice`, which shows `{"relay":"Cloudflare",…}`.
+   Relay credentials are only sent to people who join a room; Cloudflare ones
+   expire after 6 hours, and joins are limited to 30 per address per 10 minutes.
 
 ## Limits and next steps
 

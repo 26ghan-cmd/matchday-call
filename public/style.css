@@ -640,3 +640,25 @@ body.halftime.has-stage .tile { width: 100%; }
 .sync-result.warn { color: var(--gold); }
 .minute-row input::-webkit-outer-spin-button, .minute-row input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .minute-row input { -moz-appearance: textfield; appearance: textfield; }
+
+/* Connection lost: banner while socket.io reconnects */
+body.offline #call::before {
+  content: "Connection lost. Reconnecting…";
+  position: fixed; top: 0; left: 0; right: 0; z-index: 30;
+  background: #6b2226; color: #fff; text-align: center; padding: 6px; font-size: 13px; font-weight: 600;
+}
+
+/* Video connection trouble shown on the tile */
+.tile[data-state="disconnected"]::after,
+.tile[data-state="failed"]::after {
+  position: absolute; top: 8px; left: 8px;
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  background: rgba(107, 34, 38, 0.85); color: #fff;
+}
+.tile[data-state="disconnected"]::after { content: "Reconnecting…"; }
+.tile[data-state="failed"]::after { content: "Connection lost"; }
+.ctl:disabled { opacity: 0.5; cursor: not-allowed; }
+.preview-wrap.no-camera { display: flex; align-items: center; justify-content: center; }
+.preview-wrap.no-camera::after { content: "No camera"; color: var(--muted); }
+.preview-wrap.no-camera video { display: none; }
+.error.info { color: var(--gold); }

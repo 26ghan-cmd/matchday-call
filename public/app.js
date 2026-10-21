@@ -11,12 +11,9 @@ const REACTIONS = ['⚽', '🔥', '😱', '👏', '😂', '🟥'];
 const AUDIO_OPTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
 const VIDEO_OPTS = { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 24 } };
 
-// STUN/TURN servers come from our server (/ice), which keeps TURN keys secret.
+// STUN/TURN servers arrive from our server in the 'joined' message, so relay
+// credentials only go to people who are actually in a room.
 let ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
-const iceReady = fetch('/ice')
-  .then((r) => (r.ok ? r.json() : null))
-  .then((list) => { if (Array.isArray(list) && list.length) ICE_SERVERS = list; })
-  .catch(() => {});
 const hasTurn = () => ICE_SERVERS.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)));
 
 const $ = (s) => document.querySelector(s);
@@ -51,26 +48,63 @@ const params = new URLSearchParams(location.search);
 $('#room').value = params.get('room') || 'matchday-' + Math.random().toString(36).slice(2, 6);
 try { $('#name').value = localStorage.getItem('mc-name') || ''; } catch {}
 
+// Try camera + mic, then mic only, then camera only. If nothing works you can
+// still join to watch, listen and chat. A camera already in use by another app
+// (Zoom, Teams…) or a laptop without a webcam no longer stops you joining.
 async function startPreview() {
-  try {
-    // Echo cancellation + noise suppression keep TV commentary out of the call.
-    localStream = await navigator.mediaDevices.getUserMedia({ video: VIDEO_OPTS, audio: AUDIO_OPTS });
-    $('#preview').srcObject = localStream;
-  } catch (err) {
-    $('#lobbyError').textContent =
-      'Camera/mic unavailable (' + err.name + '). Allow access in your browser and reload.';
-    $('#joinBtn').disabled = true;
+  const joinBtn = $('#joinBtn');
+  joinBtn.disabled = true;
+  joinBtn.textContent = 'Waiting for camera and mic…';
+  const attempts = [
+    { video: VIDEO_OPTS, audio: AUDIO_OPTS },   // Echo cancellation + noise suppression
+    { audio: AUDIO_OPTS },                      // keep TV commentary out of the call.
+    { video: VIDEO_OPTS },
+  ];
+  let lastError = null;
+  for (const constraints of attempts) {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      break;
+    } catch (err) {
+      lastError = err;
+      if (err.name === 'NotAllowedError' || err.name === 'SecurityError') break; // asking again won't help
+    }
   }
+  const hasMic = !!localStream?.getAudioTracks().length;
+  const hasCam = !!localStream?.getVideoTracks().length;
+  if (!localStream) localStream = new MediaStream(); // watch-only
+  $('#preview').srcObject = hasCam ? localStream : null;
+  $('#preview').closest('.preview-wrap').classList.toggle('no-camera', !hasCam);
+
+  const note = $('#lobbyError');
+  note.classList.toggle('info', hasMic || hasCam);
+  if (hasMic && hasCam) note.textContent = '';
+  else if (hasMic) note.textContent = 'No camera available (it may be in use by another app). You\'ll join with audio only.';
+  else if (hasCam) note.textContent = 'No microphone available. You\'ll join with video only.';
+  else if (lastError?.name === 'NotAllowedError') {
+    note.textContent = 'Camera and mic are blocked. You can still join to watch, listen and chat, or allow access in your browser and reload.';
+  } else {
+    note.textContent = 'No camera or microphone found. You can still join to watch, listen and chat.';
+  }
+  joinBtn.disabled = false;
+  joinBtn.textContent = 'Join the room';
 }
 startPreview();
 
-$('#joinForm').addEventListener('submit', async (e) => {
+let joinStarted = false;
+$('#joinForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  if (!localStream) return;
-  await iceReady; // make sure we have relay servers before calling anyone
+  if (joinStarted) return;           // ignore double-clicks
+  if (!localStream) {                // the camera/mic prompt is still open
+    $('#lobbyError').textContent = 'Answer the camera and microphone prompt first (or block it to join without them).';
+    return;
+  }
+  joinStarted = true;
+  $('#joinBtn').disabled = true;
 
   myName = $('#name').value.trim() || 'Fan';
   const room = $('#room').value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').slice(0, 64);
+  myRoom = room;
   try { localStorage.setItem('mc-name', myName); } catch {}
   history.replaceState(null, '', '?room=' + encodeURIComponent(room));
 
@@ -89,14 +123,42 @@ $('#joinForm').addEventListener('submit', async (e) => {
   buildReactionTray();
   renderStage();
 
-  socket.connect();
-  socket.emit('join', { room, name: myName });
+  socket.connect(); // joins the room as soon as the connection is up (see 'connect')
 });
+
+// =====================================================================
+// Joining, and rejoining after the connection drops
+// =====================================================================
+// Socket.io reconnects by itself after a Wi-Fi blip, laptop sleep or a server
+// restart, but as a brand-new connection that isn't in any room. So on every
+// (re)connect we drop the old video connections, which are dead or soon will
+// be, and join the room again; everyone then reconnects to us as normal.
+let myRoom = '';
+let joinedBefore = false;
+
+socket.on('connect', () => {
+  if (!myRoom) return;
+  if (joinedBefore) {
+    [...peers.keys()].forEach(closePeer);
+  }
+  socket.emit('join', { room: myRoom, name: myName });
+});
+
+socket.on('join-error', ({ message }) => toast(message));
 
 // =====================================================================
 // Video tiles
 // =====================================================================
 const tileEl = (id) => document.getElementById('tile-' + id);
+
+// The first visible character, keeping emoji (and flags, skin tones…) whole.
+function firstCharacter(name) {
+  const text = (name || '?').trim() || '?';
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+    return new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)[Symbol.iterator]().next().value.segment;
+  }
+  return Array.from(text)[0];
+}
 const displayName = (id) => (id === 'me' ? 'You' : peers.get(id)?.name || 'Someone');
 
 function addTile(id, name, isLocal = false) {
@@ -106,7 +168,7 @@ function addTile(id, name, isLocal = false) {
   tile.className = 'tile' + (isLocal ? ' local' : '');
   tile.id = 'tile-' + id;
   tile.dataset.id = id;
-  tile.dataset.initial = (name || '?').trim().charAt(0).toUpperCase();
+  tile.dataset.initial = firstCharacter(name).toUpperCase();
   tile.innerHTML =
     '<video autoplay playsinline></video>' +
     '<canvas class="delayed-view"></canvas>' +
@@ -221,8 +283,14 @@ function watchSpeaking(tile, stream, node = null) {
   tile._speakTrack = track;
   const analyser = audioCtx.createAnalyser();
   analyser.fftSize = 512;
-  if (node) node.connect(analyser);
-  else audioCtx.createMediaStreamSource(new MediaStream([track])).connect(analyser);
+  try { tile._speakSource?.disconnect(); } catch {}
+  if (node) {
+    node.connect(analyser);
+    tile._speakSource = null;
+  } else {
+    tile._speakSource = audioCtx.createMediaStreamSource(new MediaStream([track]));
+    tile._speakSource.connect(analyser);
+  }
   const buf = new Uint8Array(analyser.fftSize);
   const tick = () => {
     if (!tile.isConnected || tile._speakTrack !== track) return; // tile gone or device switched
@@ -331,13 +399,19 @@ function createPeer(id, name, initiator, state = {}) {
   };
 
   pc.onconnectionstatechange = () => {
+    const state = pc.connectionState;
     const tile = tileEl(id);
-    if (tile) tile.dataset.state = pc.connectionState;
-    if (pc.connectionState === 'connected') capBitrates(pc);
-    if (pc.connectionState === 'failed') {
-      toast(hasTurn()
-        ? `Couldn't reach ${name}. Try reloading both pages.`
-        : `Couldn't reach ${name}. This app needs a TURN relay set up (see README).`);
+    if (tile) tile.dataset.state = state;
+    clearTimeout(peer.restartTimer);
+    if (state === 'connected') {
+      peer.restarts = 0;
+      peer.gaveUp = false;
+      capBitrates(pc);
+    } else if (state === 'disconnected') {
+      // Often a brief network blip that heals itself; if not, restart.
+      peer.restartTimer = setTimeout(() => restartConnection(id), 5000);
+    } else if (state === 'failed') {
+      restartConnection(id);
     }
   };
 
@@ -399,6 +473,35 @@ async function replaceSlot(slot, track) {
   }));
 }
 
+// ICE restart: find a new network route without tearing the call down.
+// Only one side starts it (the one with the smaller id) so the two offers can't collide.
+const MAX_RESTARTS = 3;
+function restartConnection(id) {
+  const peer = peers.get(id);
+  if (!peer || !myId || !['disconnected', 'failed'].includes(peer.pc.connectionState)) return;
+  if ((peer.restarts || 0) >= MAX_RESTARTS) {
+    if (peer.pc.connectionState === 'failed' && !peer.gaveUp) {
+      peer.gaveUp = true;
+      toast(hasTurn()
+        ? `Couldn't reach ${peer.name}. Try reloading both pages.`
+        : `Couldn't reach ${peer.name}. This app needs a TURN relay set up (see README).`);
+    }
+    return;
+  }
+  if (myId > id) {
+    // The other side will restart; check again later in case it can't.
+    peer.restartTimer = setTimeout(() => restartConnection(id), 8000);
+    return;
+  }
+  peer.restarts = (peer.restarts || 0) + 1;
+  enqueue(peer, async () => {
+    if (peer.pc.signalingState !== 'stable') return;
+    await peer.pc.setLocalDescription(await peer.pc.createOffer({ iceRestart: true }));
+    socket.emit('signal', { to: id, data: { description: peer.pc.localDescription } });
+  });
+  peer.restartTimer = setTimeout(() => restartConnection(id), 10000); // try again if it doesn't take
+}
+
 // Process each peer's signaling messages strictly in order.
 function enqueue(peer, fn) {
   peer.queue = peer.queue.then(fn).catch((err) => console.error('signaling error', err));
@@ -419,12 +522,20 @@ function closePeer(id) {
 // =====================================================================
 // Signaling events
 // =====================================================================
-socket.on('joined', ({ id, peers: list, history: past = [] }) => {
+socket.on('joined', ({ id, peers: list, ice, history: past = [] }) => {
   myId = id;
-  past.forEach((m) => addChatMessage(m, { silent: true }));
-  addSystemMessage('You joined the room');
+  if (Array.isArray(ice) && ice.length) ICE_SERVERS = ice;
+  document.body.classList.remove('offline');
+  if (!joinedBefore) {
+    past.forEach((m) => addChatMessage(m, { silent: true }));
+    addSystemMessage('You joined the room');
+    toast(list.length ? `You're in. ${list.length} already here.` : "You're first in. Share the invite link!");
+  } else {
+    addSystemMessage('Reconnected');
+    toast('Reconnected');
+  }
+  joinedBefore = true;
   list.forEach((p) => createPeer(p.id, p.name, true, p.state)); // newcomer calls everyone
-  toast(list.length ? `You're in. ${list.length} already here.` : "You're first in. Share the invite link!");
   sendState();
 });
 
@@ -441,18 +552,27 @@ socket.on('signal', ({ from, name, data }) => {
   enqueue(peer, async () => {
     if (data.description) {
       await pc.setRemoteDescription(data.description);
-      for (const c of peer.pending.splice(0)) await pc.addIceCandidate(c);
+      for (const c of peer.pending.splice(0)) await addCandidate(pc, c);
       if (data.description.type === 'offer') {
         if (!peer.slotsReady) await fillSlots(peer);
         await pc.setLocalDescription(await pc.createAnswer());
         socket.emit('signal', { to: from, data: { description: pc.localDescription } });
       }
     } else if (data.candidate) {
-      if (pc.remoteDescription) await pc.addIceCandidate(data.candidate);
+      if (pc.remoteDescription) await addCandidate(pc, data.candidate);
       else peer.pending.push(data.candidate);
     }
   });
 });
+
+// A single bad network candidate shouldn't stop the rest of the connection setup.
+async function addCandidate(pc, candidate) {
+  try {
+    await pc.addIceCandidate(candidate);
+  } catch (err) {
+    console.warn('Skipped a network candidate:', err.message);
+  }
+}
 
 socket.on('peer-state', ({ id, mic, cam, screen }) => {
   const peer = peers.get(id);
@@ -476,7 +596,11 @@ socket.on('room-full', ({ max }) => {
 });
 
 socket.on('disconnect', (reason) => {
-  if (reason !== 'io client disconnect') toast('Connection lost. Reload to rejoin.');
+  if (reason === 'io client disconnect') return; // you pressed Leave
+  document.body.classList.add('offline');
+  toast('Connection lost. Reconnecting…');
+  // If the server closed the connection on purpose, socket.io won't retry by itself.
+  if (reason === 'io server disconnect') setTimeout(() => socket.connect(), 1000);
 });
 
 // =====================================================================
@@ -486,17 +610,20 @@ function sendState() {
   const state = localState();
   socket.emit('state', state);
   applyTileState('me', state);
-  setBtn('#micBtn', state.mic, 'Mic on', 'Muted');
-  setBtn('#camBtn', state.cam, 'Camera on', 'Camera off');
+  setBtn('#micBtn', state.mic, 'Mic on', 'Muted', micTrack() ? null : 'No mic');
+  setBtn('#camBtn', state.cam, 'Camera on', 'Camera off', cameraTrack() ? null : 'No camera');
   $('#shareBtn').classList.toggle('sharing', state.screen);
+  $('#shareBtn').setAttribute('aria-pressed', String(state.screen));
   $('#shareBtn').querySelector('span').textContent = state.screen ? 'Stop sharing' : 'Share screen';
   renderPeople();
 }
 
-function setBtn(sel, on, onText, offText) {
+function setBtn(sel, on, onText, offText, missingText = null) {
   const b = $(sel);
   b.classList.toggle('on', on);
-  b.querySelector('span').textContent = on ? onText : offText;
+  b.setAttribute('aria-pressed', String(on));
+  b.disabled = !!missingText;
+  b.querySelector('span').textContent = missingText || (on ? onText : offText);
 }
 
 function toggleTrack(kind) {
@@ -835,8 +962,10 @@ $('#speakerSelect').onchange = (e) => {
 function setMode(mode) {
   document.body.classList.toggle('match', mode === 'match');
   document.body.classList.toggle('halftime', mode === 'halftime');
-  document.querySelectorAll('.mode-switch button').forEach((b) =>
-    b.classList.toggle('active', b.dataset.mode === mode));
+  document.querySelectorAll('.mode-switch button').forEach((b) => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+    b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
+  });
 }
 document.querySelectorAll('.mode-switch button').forEach((btn) => {
   btn.onclick = () => setMode(btn.dataset.mode);
@@ -861,7 +990,7 @@ $('#leaveBtn').onclick = () => {
 
 document.addEventListener('keydown', (e) => {
   if ($('#call').hidden || $('#settings').open) return;
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
     if (e.key === 'Escape') e.target.blur();
     return;

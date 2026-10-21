@@ -20,6 +20,7 @@ const sync = {
   delayers: new Map(), // socket id -> VideoDelayer
   stageTarget: null,   // { id } when the telly shows a held-back camera
   lastStatus: null,
+  myTaps: {},          // half -> our last tap, re-sent after a reconnect
 };
 try { sync.shield = localStorage.getItem('mc-shield') !== 'off'; } catch {}
 
@@ -58,7 +59,11 @@ function applySyncState(state) {
   renderSyncStatus();
   if (typeof renderPeople === 'function') renderPeople();
 }
-socket.on('joined', ({ sync: state }) => applySyncState(state));
+socket.on('joined', ({ sync: state }) => {
+  applySyncState(state);
+  // After a reconnect the server has forgotten our TV sync; send it again.
+  Object.values(sync.myTaps).forEach((tap, i) => setTimeout(() => socket.emit('sync', tap), i * 600));
+});
 socket.on('sync-state', applySyncState);
 socket.on('sync-error', ({ message }) => toast(message));
 
@@ -350,12 +355,14 @@ $('#syncKickTap').addEventListener('pointerdown', (e) => {
 });
 
 function sendSync(half, clockSec, tapAt) {
+  sync.myTaps[half] = { half, clockSec, tapAt }; // kept so we can re-send after a reconnect
   socket.emit('sync', { half, clockSec, tapAt });
   $('#syncResult').textContent = 'Synced! Checking against everyone else…';
   sync.awaitingResult = true;
 }
 
 $('#syncReset').onclick = () => {
+  sync.myTaps = {};
   socket.emit('sync-clear');
   $('#syncResult').textContent = 'Your sync has been cleared.';
 };

@@ -76,16 +76,32 @@ function followMatch(room, fixtureId) {
 // ---------- ICE servers (STUN + TURN relay) ----------
 // TURN relays video when two people's networks block a direct connection.
 // Configure ONE provider with environment variables (e.g. on Render):
+//   Cloudflare: CLOUDFLARE_TURN_KEY_ID, CLOUDFLARE_TURN_API_TOKEN  (recommended)
 //   Metered:    METERED_APP_NAME, METERED_API_KEY
-//   Cloudflare: CLOUDFLARE_TURN_KEY_ID, CLOUDFLARE_TURN_API_TOKEN
 //   Any other:  TURN_URLS (comma-separated), TURN_USERNAME, TURN_CREDENTIAL
+//
+// Every browser in a call needs the relay username/password, so they can't be
+// fully secret. To limit misuse we only hand them to people who have joined a
+// room (in the 'joined' message, never over plain HTTP), Cloudflare credentials
+// expire after a few hours, and joins are rate limited per address.
 const FALLBACK_ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
+const CREDENTIAL_TTL_S = 6 * 3600;   // long enough for a match plus extra time
+const CREDENTIAL_REUSE_MS = 20 * 60e3; // so every credential handed out has 5h+ left
 let iceCache = { servers: null, expires: 0 };
+
+const relayProvider = () => {
+  const env = process.env;
+  if (env.CLOUDFLARE_TURN_KEY_ID && env.CLOUDFLARE_TURN_API_TOKEN) return 'Cloudflare';
+  if (env.METERED_APP_NAME && env.METERED_API_KEY) return 'Metered';
+  if (env.TURN_URLS && env.TURN_USERNAME && env.TURN_CREDENTIAL) return 'custom TURN';
+  return null;
+};
 
 async function fetchIceServers() {
   const env = process.env;
+  const provider = relayProvider();
 
-  if (env.CLOUDFLARE_TURN_KEY_ID && env.CLOUDFLARE_TURN_API_TOKEN) {
+  if (provider === 'Cloudflare') {
     const res = await fetch(
       `https://rtc.live.cloudflare.com/v1/turn/keys/${env.CLOUDFLARE_TURN_KEY_ID}/credentials/generate-ice-servers`,
       {
@@ -94,7 +110,8 @@ async function fetchIceServers() {
           Authorization: `Bearer ${env.CLOUDFLARE_TURN_API_TOKEN}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ ttl: 86400 }),
+        body: JSON.stringify({ ttl: CREDENTIAL_TTL_S }),
+        signal: AbortSignal.timeout(8000),
       }
     );
     if (!res.ok) throw new Error(`Cloudflare TURN returned ${res.status}`);
@@ -104,18 +121,19 @@ async function fetchIceServers() {
       ...s,
       urls: [].concat(s.urls).filter((u) => !/:53(\?|$)/.test(u)),
     }));
-    return { servers: list, ttlMs: 12 * 3600e3 };
+    return { servers: list, ttlMs: CREDENTIAL_REUSE_MS };
   }
 
-  if (env.METERED_APP_NAME && env.METERED_API_KEY) {
+  if (provider === 'Metered') {
     const res = await fetch(
-      `https://${env.METERED_APP_NAME}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(env.METERED_API_KEY)}`
+      `https://${env.METERED_APP_NAME}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(env.METERED_API_KEY)}`,
+      { signal: AbortSignal.timeout(8000) }
     );
     if (!res.ok) throw new Error(`Metered TURN returned ${res.status}`);
-    return { servers: await res.json(), ttlMs: 3600e3 };
+    return { servers: await res.json(), ttlMs: CREDENTIAL_REUSE_MS };
   }
 
-  if (env.TURN_URLS && env.TURN_USERNAME && env.TURN_CREDENTIAL) {
+  if (provider === 'custom TURN') {
     return {
       servers: [
         ...FALLBACK_ICE,
@@ -132,24 +150,58 @@ async function fetchIceServers() {
   return { servers: FALLBACK_ICE, ttlMs: 24 * 3600e3 };
 }
 
-app.get('/ice', async (req, res) => {
+async function iceServersForJoin() {
   try {
     if (!iceCache.servers || Date.now() > iceCache.expires) {
       const { servers, ttlMs } = await fetchIceServers();
       iceCache = { servers, expires: Date.now() + ttlMs };
     }
-    res.set('Cache-Control', 'no-store').json(iceCache.servers);
+    return iceCache.servers;
   } catch (err) {
     console.error('TURN setup failed:', err.message);
-    res.json(FALLBACK_ICE); // the call still works for people on friendly networks
+    return FALLBACK_ICE; // the call still works for people on friendly networks
   }
+}
+
+// Status only (no credentials), handy for checking the relay is configured.
+app.get('/ice', (req, res) => {
+  res.set('Cache-Control', 'no-store').json({ relay: relayProvider(), credentials: 'sent to people who join a room' });
 });
 
+// At most JOIN_LIMIT joins per address per 10 minutes (covers reconnects comfortably).
+const JOIN_LIMIT = 30;
+const joinLog = new Map(); // address -> [timestamps]
+function joinAllowed(socket) {
+  const fwd = socket.handshake?.headers?.['x-forwarded-for'];
+  const addr = (fwd ? String(fwd).split(',')[0].trim() : socket.handshake?.address) || 'unknown';
+  const now = Date.now();
+  const recent = (joinLog.get(addr) || []).filter((t) => now - t < 10 * 60e3);
+  if (recent.length >= JOIN_LIMIT) return false;
+  recent.push(now);
+  joinLog.set(addr, recent);
+  return true;
+}
+setInterval(() => {
+  const now = Date.now();
+  joinLog.forEach((list, addr) => {
+    const recent = list.filter((t) => now - t < 10 * 60e3);
+    if (recent.length) joinLog.set(addr, recent); else joinLog.delete(addr);
+  });
+}, 10 * 60e3).unref();
+
 io.on('connection', (socket) => {
-  socket.on('join', ({ room, name } = {}) => {
+  socket.on('join', async ({ room, name } = {}) => {
     room = String(room || '').trim().slice(0, 64);
     name = String(name || 'Fan').trim().slice(0, 32) || 'Fan';
-    if (!room || socket.data.room) return;
+    if (!room || socket.data.room || socket.data.joining) return;
+    if (!joinAllowed(socket)) {
+      socket.emit('join-error', { message: 'Too many joins from your connection. Wait a few minutes and try again.' });
+      return;
+    }
+    socket.data.joining = true;
+    const ice = await iceServersForJoin();
+    socket.data.joining = false;
+    if (!socket.connected) return;
 
     const members = io.sockets.adapter.rooms.get(room);
     if (members && members.size >= MAX_PEERS) {
@@ -170,7 +222,7 @@ io.on('connection', (socket) => {
     socket.join(room);
     const matchId = roomMatch.get(room) || null;
     socket.emit('joined', {
-      id: socket.id, peers, history: chatHistory.get(room) || [],
+      id: socket.id, peers, ice, history: chatHistory.get(room) || [],
       match: matchId ? { fixtureId: matchId, data: hub.payload(matchId) } : null,
       sync: syncState(room),
     });
@@ -282,10 +334,7 @@ io.on('connection', (socket) => {
 server.listen(PORT, () => {
   console.log(`Matchday Call running at http://localhost:${PORT}`);
   const env = process.env;
-  const provider =
-    env.CLOUDFLARE_TURN_KEY_ID ? 'Cloudflare' :
-    env.METERED_APP_NAME ? 'Metered' :
-    env.TURN_URLS ? 'custom TURN' : null;
+  const provider = relayProvider();
   console.log(provider
     ? `TURN relay: ${provider}`
     : 'TURN relay: not configured (some friends may fail to connect; see README)');

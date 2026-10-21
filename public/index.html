@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Matchday Call</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%BD%3C/text%3E%3C/svg%3E">
 </head>
 <body class="lobby">
 
@@ -36,8 +37,8 @@
         <button id="syncBtn" class="sync-btn">⏱ <span>Sync TV</span></button>
         <button id="countBtn" class="count" title="People in the room">👥 <span id="countLabel">1</span></button>
         <div class="mode-switch" role="group" aria-label="Layout">
-          <button data-mode="match" class="active" title="Compact faces, eyes on the TV">Match</button>
-          <button data-mode="halftime" title="Big faces, time to chat">Halftime</button>
+          <button data-mode="match" class="active" aria-pressed="true" title="Compact faces, eyes on the TV">Match</button>
+          <button data-mode="halftime" aria-pressed="false" title="Big faces, time to chat">Halftime</button>
         </div>
       </div>
     </header>
