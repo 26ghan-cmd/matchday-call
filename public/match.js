@@ -293,6 +293,7 @@ function render(data) {
   renderScorers(f, 'away');
 
   renderStats(f);
+  renderProbChart(data.oddsHistory || [], f);
   renderFeed(data.feed);
   renderOdds(data.odds, f);
   renderLineups(f);
@@ -659,4 +660,182 @@ function renderKalshi(data) {
   box.appendChild(el('p', 'odds-foot',
     `${updated && !isNaN(updated) ? `Prices as of ${updated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}${mc.delay ? ` (shown ${mc.delay}s later, to match your spoiler delay)` : ''}. ` : ''}` +
     'Kalshi is a regulated US exchange; trading needs a Kalshi account (18+, not available everywhere). For information only, not financial advice.'));
+}
+
+// =====================================================================
+// Win-probability chart: how the chance of a home win / draw / away win has
+// moved through the match, from the live odds (bookmaker margin removed).
+// Hand-drawn SVG: three 2px lines (draw dashed), direct labels at the end,
+// goal and red-card markers, and a crosshair tooltip on hover.
+// =====================================================================
+const PROB_SERIES = [
+  { key: 'home', cls: 'home' },
+  { key: 'draw', cls: 'draw', dash: '5 4' },
+  { key: 'away', cls: 'away' },
+];
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, attrs = {}) => {
+  const e = document.createElementNS(SVG_NS, tag);
+  Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+  return e;
+};
+const probChart = { history: [], fixture: null, width: 0, hoverX: null, tableOpen: false };
+
+function renderProbChart(history, f) {
+  probChart.history = history;
+  probChart.fixture = f;
+  drawProbChart();
+}
+
+new ResizeObserver(() => {
+  const w = $('#mcProb').clientWidth;
+  if (w && Math.abs(w - probChart.width) > 4) drawProbChart();
+}).observe($('#mcProb'));
+
+function seriesName(key, f) {
+  return key === 'home' ? f.home.short : key === 'away' ? f.away.short : 'Draw';
+}
+
+function drawProbChart() {
+  const box = $('#mcProb');
+  const f = probChart.fixture;
+  const h = probChart.history;
+  box.replaceChildren();
+  if (!f) return;
+
+  const head = el('div', 'prob-head');
+  head.appendChild(el('h4', 'prob-title', 'Win probability'));
+  const legend = el('div', 'prob-legend');
+  PROB_SERIES.forEach((s) => {
+    const item = el('span', 'prob-key');
+    item.append(el('span', `prob-swatch ${s.cls}`), document.createTextNode(s.key === 'draw' ? 'Draw' : f[s.key].name));
+    legend.appendChild(item);
+  });
+  head.appendChild(legend);
+  box.appendChild(head);
+
+  if (h.length < 1) {
+    box.appendChild(el('p', 'prob-empty', 'The chart fills in from the live odds once they’re available for this match.'));
+    return;
+  }
+
+  const width = Math.max(260, box.clientWidth || 400);
+  probChart.width = width;
+  const height = 150;
+  const pad = { l: 34, r: 74, t: 14, b: 22 };
+  const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
+  const x = (min) => pad.l + (Math.min(Math.max(min, 0), 90) / 90) * iw;
+  const y = (pct) => pad.t + (1 - pct / 100) * ih;
+
+  const svg = svgEl('svg', { viewBox: `0 0 ${width} ${height}`, width, height, class: 'prob-svg', role: 'img' });
+  const latest = h[h.length - 1];
+  svg.setAttribute('aria-label', `Win probability at ${latest.minute} minutes: ${f.home.name} ${latest.home}%, draw ${latest.draw}%, ${f.away.name} ${latest.away}%.`);
+
+  // Recessive grid: 0 / 50 / 100%, half-time line, 15-minute ticks.
+  [0, 50, 100].forEach((p) => {
+    svg.appendChild(svgEl('line', { x1: pad.l, x2: pad.l + iw, y1: y(p), y2: y(p), class: p === 0 ? 'prob-axis' : 'prob-grid' }));
+    const t = svgEl('text', { x: pad.l - 6, y: y(p) + 4, class: 'prob-tick', 'text-anchor': 'end' });
+    t.textContent = `${p}%`;
+    svg.appendChild(t);
+  });
+  [0, 15, 30, 45, 60, 75, 90].forEach((m) => {
+    const t = svgEl('text', { x: x(m), y: height - 6, class: 'prob-tick', 'text-anchor': 'middle' });
+    t.textContent = m === 45 ? 'HT' : m === 0 ? 'KO' : `${m}'`;
+    svg.appendChild(t);
+  });
+  svg.appendChild(svgEl('line', { x1: x(45), x2: x(45), y1: pad.t, y2: pad.t + ih, class: 'prob-grid' }));
+
+  // Goals and red cards, as faint verticals with a small icon at the top.
+  const cancelled = f.events.filter((e) => e.type === 'var' && /cancel|disallow/i.test(e.detail));
+  f.events.filter((e) => ['goal', 'penalty', 'owngoal', 'red'].includes(e.type)).forEach((e) => {
+    if (e.type !== 'red' && cancelled.some((c) => c.team === e.team && c.minute - e.minute >= 0 && c.minute - e.minute <= 3)) return;
+    const mx = x(Math.min(e.minute, e.minute <= 45 ? 45 : 90));
+    svg.appendChild(svgEl('line', { x1: mx, x2: mx, y1: pad.t, y2: pad.t + ih, class: 'prob-event' }));
+    const icon = svgEl('text', { x: mx, y: pad.t - 2, class: 'prob-event-icon', 'text-anchor': 'middle' });
+    icon.textContent = e.type === 'red' ? '🟥' : '⚽';
+    svg.appendChild(icon);
+  });
+
+  // The three lines. A lone pre-match point is drawn as a short flat stub.
+  const pts = h.length === 1 ? [h[0], { ...h[0], minute: 1 }] : h;
+  PROB_SERIES.forEach((s) => {
+    const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.minute).toFixed(1)},${y(p[s.key]).toFixed(1)}`).join(' ');
+    const path = svgEl('path', { d, class: `prob-line ${s.cls}` });
+    if (s.dash) path.setAttribute('stroke-dasharray', s.dash);
+    svg.appendChild(path);
+    svg.appendChild(svgEl('circle', { cx: x(latest.minute), cy: y(latest[s.key]), r: 4, class: `prob-dot ${s.cls}` }));
+  });
+
+  // Direct labels at the line ends, nudged apart so they never overlap.
+  const labels = PROB_SERIES.map((s) => ({ s, y: y(latest[s.key]), text: `${seriesName(s.key, f)} ${Math.round(latest[s.key])}%` }))
+    .sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) labels[i].y = Math.max(labels[i].y, labels[i - 1].y + 13);
+  const over = labels[labels.length - 1].y - (pad.t + ih);
+  if (over > 0) labels.forEach((l) => { l.y -= over; });
+  labels.forEach((l) => {
+    const t = svgEl('text', { x: x(latest.minute) + 8, y: l.y + 4, class: 'prob-label' });
+    t.textContent = l.text;
+    svg.appendChild(t);
+  });
+
+  // Hover: crosshair + tooltip with all three values at that minute.
+  const cross = svgEl('line', { y1: pad.t, y2: pad.t + ih, class: 'prob-cross', visibility: 'hidden' });
+  svg.appendChild(cross);
+  const hit = svgEl('rect', { x: pad.l, y: 0, width: iw + 8, height: height, class: 'prob-hit' });
+  svg.appendChild(hit);
+  const tip = el('div', 'prob-tip');
+  tip.hidden = true;
+
+  const showAt = (clientX) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((clientX - r.left) / r.width) * width;
+    const minute = ((px - pad.l) / iw) * 90;
+    let p = h[0];
+    for (const q of h) { if (q.minute <= minute + 0.5) p = q; else break; }
+    cross.setAttribute('x1', x(p.minute));
+    cross.setAttribute('x2', x(p.minute));
+    cross.setAttribute('visibility', 'visible');
+    tip.replaceChildren(el('strong', '', p.minute === 0 ? 'Before kick-off' : p.minute === 45 && h.some((q) => q.minute > 45) ? 'Half-time' : `${p.minute}'`));
+    PROB_SERIES.forEach((s) => {
+      const row = el('div', 'prob-tip-row');
+      row.append(el('span', `prob-swatch ${s.cls}`), el('span', '', s.key === 'draw' ? 'Draw' : f[s.key].name), el('b', '', `${p[s.key].toFixed(0)}%`));
+      tip.appendChild(row);
+    });
+    tip.hidden = false;
+    const left = (x(p.minute) / width) * r.width;
+    tip.style.left = `${Math.min(Math.max(left + 12, 0), r.width - 150)}px`;
+  };
+  // Remember the pointer so a data update doesn't close the tooltip.
+  hit.addEventListener('pointermove', (e) => { probChart.hoverX = e.clientX; showAt(e.clientX); });
+  hit.addEventListener('pointerdown', (e) => { probChart.hoverX = e.clientX; showAt(e.clientX); });
+  hit.addEventListener('pointerleave', () => { probChart.hoverX = null; tip.hidden = true; cross.setAttribute('visibility', 'hidden'); });
+
+  const wrap = el('div', 'prob-wrap');
+  wrap.append(svg, tip);
+  box.appendChild(wrap);
+  if (probChart.hoverX != null) showAt(probChart.hoverX);
+
+  // Table view: the same numbers at kick-off, each goal / red card, and now.
+  const details = el('details', 'prob-table');
+  details.open = probChart.tableOpen;
+  details.addEventListener('toggle', () => { probChart.tableOpen = details.open; });
+  details.appendChild(el('summary', '', 'Show as table'));
+  const table = el('table');
+  const thead = el('tr');
+  ['Minute', f.home.short, 'Draw', f.away.short].forEach((t) => thead.appendChild(el('th', '', t)));
+  table.appendChild(thead);
+  const moments = new Set([h[0]]);
+  f.events.filter((e) => ['goal', 'penalty', 'owngoal', 'red'].includes(e.type)).forEach((e) => {
+    const after = h.find((p) => p.minute >= Math.min(e.minute, 90) + 1) || latest;
+    moments.add(after);
+  });
+  moments.add(latest);
+  [...moments].sort((a, b) => a.at - b.at).forEach((p) => {
+    const tr = el('tr');
+    [p.minute === 0 ? 'KO' : `${p.minute}'`, `${Math.round(p.home)}%`, `${Math.round(p.draw)}%`, `${Math.round(p.away)}%`]
+      .forEach((t) => tr.appendChild(el('td', '', t)));
+    table.appendChild(tr);
+  });
+  details.appendChild(table);
+  box.appendChild(details);
 }

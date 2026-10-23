@@ -31,7 +31,10 @@ to avoid feedback.
   drop are restarted automatically.
 - **Match centre:** the room picks a Premier League match (or the demo match) and
   everyone sees the live score, stats, written play-by-play with analysis, live
-  odds and lineups. It fills the telly when nothing is shared or pinned, and is
+  odds and lineups. The Stats tab opens with a **win-probability chart**:
+  how the chances of a home win, draw and away win have moved through the match
+  (from the live odds, bookmaker margin removed), with goals and red cards marked,
+  a hover tooltip and a table view. It fills the telly when nothing is shared or pinned, and is
   always available from the scorebug in the top bar or the **Match** tab.
 - **The telly:** the big area at the top shows the match centre, a shared screen,
   or whoever you've pinned. Full-screen button included.

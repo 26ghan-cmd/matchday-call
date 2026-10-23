@@ -15,6 +15,44 @@ const ODDS_POLL_MS = Math.max(15, Number(env.ODDS_POLL_SECONDS) || 30) * 1000;
 const FIXTURE_LIST_MS = 10 * 60 * 1000;
 const DEMO_SECONDS_PER_MINUTE = Math.max(1, Number(env.DEMO_SECONDS_PER_MINUTE) || 4);
 
+// ---------------------------------------------------------------------------
+// Win-probability history for the chart: each time the full-time-result odds
+// change, store the chances they imply (with the bookmaker's margin removed)
+// against the match minute.
+// ---------------------------------------------------------------------------
+const MAX_HISTORY = 500;
+
+function matchMinute(status) {
+  const st = status.short;
+  const e = status.elapsed ?? 0;
+  if (st === 'NS' || st === 'TBD') return 0;
+  if (st === '1H') return Math.min(e, 45); // first-half stoppage time sits at 45
+  if (st === 'HT') return 45;
+  if (st === '2H') return Math.max(46, Math.min(e, 90));
+  return Math.min(Math.max(e, 0), 90);
+}
+
+function recordOdds(m) {
+  const f = m.fixture;
+  const result = m.odds?.markets?.find((mk) => mk.key === 'result');
+  if (!f || !result || m.odds.suspended) return;
+  const price = (key) => result.values.find((v) => v.key === key)?.odd;
+  const odds = ['home', 'draw', 'away'].map(price);
+  if (odds.some((o) => !o || o <= 1)) return;
+  const inv = odds.map((o) => 1 / o);
+  const total = inv.reduce((a, b) => a + b, 0);
+  const [home, draw, away] = inv.map((x) => Math.round((x / total) * 1000) / 10);
+  const minute = matchMinute(f.status);
+  const h = m.oddsHistory;
+  const last = h[h.length - 1];
+  // Before kick-off, keep only the latest pre-match price.
+  if (last && minute === 0 && last.minute === 0) h.pop();
+  else if (last && last.minute === minute && Math.abs(last.home - home) < 0.5
+    && Math.abs(last.draw - draw) < 0.5 && Math.abs(last.away - away) < 0.5) return;
+  h.push({ minute, home, draw, away, at: Date.now() });
+  if (h.length > MAX_HISTORY) h.splice(1, h.length - MAX_HISTORY); // keep the pre-match point
+}
+
 class MatchHub extends EventEmitter {
   constructor({ log = console } = {}) {
     super();
@@ -58,7 +96,7 @@ class MatchHub extends EventEmitter {
     if (id === 'demo') id = `demo-${++this.demoCount}`;
     let m = this.matches.get(id);
     if (!m) {
-      m = { id, watchers: new Set(), fixture: null, odds: null, feed: new Feed(), timers: [], stopped: false,
+      m = { id, watchers: new Set(), fixture: null, odds: null, oddsHistory: [], feed: new Feed(), timers: [], stopped: false,
         analysing: false, pendingReason: null, version: 0 };
       this.matches.set(id, m);
       if (id.startsWith('demo-')) this.startDemo(m);
@@ -85,7 +123,7 @@ class MatchHub extends EventEmitter {
   payload(id) {
     const m = this.matches.get(id);
     if (!m || !m.fixture) return null;
-    return { fixtureId: id, fixture: m.fixture, odds: m.odds, feed: m.feed.lines, version: m.version, ai: aiEnabled() };
+    return { fixtureId: id, fixture: m.fixture, odds: m.odds, oddsHistory: m.oddsHistory, feed: m.feed.lines, version: m.version, ai: aiEnabled() };
   }
 
   publish(m) {
@@ -102,6 +140,7 @@ class MatchHub extends EventEmitter {
         if (m.stopped) return;
         this.applyFixture(m, fixture);
         m.odds = odds;
+        recordOdds(m);
         this.publish(m);
       },
     });
@@ -134,9 +173,11 @@ class MatchHub extends EventEmitter {
         else if (FINISHED_STATUSES.has(st)) { m.odds = null; this.publish(m); return; }
         else if (LIVE_STATUSES.has(st)) {
           m.odds = (await this.api.liveOdds(m.id, m.fixture)) || m.odds;
+          recordOdds(m);
           this.publish(m);
         } else {
           m.odds = (await this.api.preMatchOdds(m.id, m.fixture)) || m.odds;
+          recordOdds(m);
           this.publish(m);
           delay = 15 * 60e3;
         }

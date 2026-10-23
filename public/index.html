@@ -38,7 +38,7 @@
         <button id="countBtn" class="count" title="People in the room">👥 <span id="countLabel">1</span></button>
         <div class="mode-switch" role="group" aria-label="Layout">
           <button data-mode="match" class="active" aria-pressed="true" title="Compact faces, eyes on the TV">Match</button>
-          <button data-mode="halftime" aria-pressed="false" title="Big faces, time to chat">Halftime</button>
+          <button data-mode="halftime" aria-pressed="false" title="Big faces, time to chat"><span class="long-label">Halftime</span><span class="short-label">HT</span></button>
         </div>
       </div>
     </header>
@@ -93,7 +93,7 @@
                   </div>
                 </div>
                 <div class="mc-body">
-                  <div class="mc-pane" data-pane="stats"><div id="mcStats" class="mc-stats"></div></div>
+                  <div class="mc-pane" data-pane="stats"><div id="mcProb" class="mc-prob"></div><div id="mcStats" class="mc-stats"></div></div>
                   <div class="mc-pane" data-pane="pbp">
                     <h4 class="mc-pane-title">Play-by-play</h4>
                     <ol id="mcFeed" class="mc-feed"></ol>
