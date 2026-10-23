@@ -548,3 +548,115 @@ function applyTab() {
   });
 }
 applyTab();
+
+// =====================================================================
+// Kalshi: prediction-market prices for this match (read-only)
+// Prices jump the moment a goal goes in, so they wait out the same spoiler
+// delay as the rest of the match centre.
+// =====================================================================
+const kalshi = { buffer: [], shown: null, fixtureId: null, timer: null, loading: false };
+
+async function fetchKalshi() {
+  if (!mc.fixtureId || kalshi.loading) return;
+  kalshi.loading = true;
+  const id = mc.fixtureId;
+  try {
+    const res = await fetch(`/api/kalshi?fixture=${encodeURIComponent(id)}`);
+    const data = await res.json();
+    if (id === mc.fixtureId) kalshi.buffer.push({ at: Date.now(), data });
+  } catch {
+    if (id === mc.fixtureId) kalshi.buffer.push({ at: Date.now(), data: { error: 'Couldn’t reach Kalshi.' } });
+  } finally {
+    kalshi.loading = false;
+  }
+}
+
+// Fetch every 30s while a match is followed; show the newest result that has waited out the delay.
+setInterval(() => {
+  if (kalshi.fixtureId !== mc.fixtureId) {
+    kalshi.fixtureId = mc.fixtureId;
+    kalshi.buffer = [];
+    kalshi.shown = null;
+    if (mc.fixtureId) fetchKalshi();
+    renderKalshi(null);
+  }
+}, 500);
+setInterval(fetchKalshi, 30000);
+setInterval(() => {
+  if (!kalshi.buffer.length) return;
+  const cutoff = Date.now() - mc.delay * 1000;
+  let idx = -1;
+  kalshi.buffer.forEach((b, i) => { if (b.at <= cutoff) idx = i; });
+  if (idx < 0 && !kalshi.shown) idx = 0; // first load shows straight away, like the rest of the match centre
+  if (idx >= 0 && kalshi.buffer[idx].data !== kalshi.shown) {
+    kalshi.shown = kalshi.buffer[idx].data;
+    kalshi.buffer = kalshi.buffer.slice(idx);
+    renderKalshi(kalshi.shown);
+  }
+}, 1000);
+
+const cents = (p) => (p == null ? '–' : `${Math.round(p * 100)}¢`);
+
+function renderKalshi(data) {
+  const box = $('#mcKalshi');
+  box.replaceChildren();
+  const head = el('div', 'odds-head');
+  const title = el('span', 'odds-title', 'Kalshi prediction market');
+  head.appendChild(title);
+  box.appendChild(head);
+
+  if (!data) {
+    box.appendChild(el('p', 'mc-empty', mc.fixtureId ? 'Loading Kalshi prices…' : 'Pick a match to see Kalshi prices.'));
+    return;
+  }
+  if (data.error && !data.match && !(data.upcoming || []).length) {
+    box.appendChild(el('p', 'mc-empty', `Couldn’t load Kalshi right now. (${data.error})`));
+    return;
+  }
+
+  if (data.match) {
+    const sec = el('section', 'market');
+    sec.appendChild(el('h5', '', 'Who wins? (price of a $1 “yes”)'));
+    const row = el('div', 'market-row');
+    data.match.outcomes.forEach((o) => {
+      const cell = el('div', 'odd');
+      cell.append(
+        el('span', 'odd-label', o.side === 'draw' ? 'Draw' : o.label),
+        el('strong', 'odd-price', cents(o.price)),
+        el('span', 'odd-pct', o.price != null ? `${Math.round(o.price * 100)}% chance` : 'no trades yet'),
+      );
+      if (o.bid != null && o.ask != null && o.ask > 0) {
+        cell.appendChild(el('span', 'odd-spread', `buy ${cents(o.ask)} · sell ${cents(o.bid)}`));
+      }
+      row.appendChild(cell);
+    });
+    sec.appendChild(row);
+    box.appendChild(sec);
+  } else {
+    box.appendChild(el('p', 'mc-empty', data.demo
+      ? 'The demo match isn’t on Kalshi (the clubs are made up). Real Premier League games are listed below.'
+      : 'Kalshi doesn’t have a market for this match right now.'));
+  }
+
+  if ((data.upcoming || []).length) {
+    box.appendChild(el('h5', 'kalshi-sub', data.match ? 'Other Premier League games on Kalshi' : 'Premier League games on Kalshi'));
+    const list = el('ul', 'kalshi-list');
+    data.upcoming.forEach((g) => {
+      const li = el('li', '');
+      li.appendChild(el('span', 'kalshi-game', g.title || g.eventTicker));
+      li.appendChild(el('span', 'kalshi-prices', g.outcomes.map((o) => `${o.label} ${cents(o.price)}`).join(' · ')));
+      list.appendChild(li);
+    });
+    box.appendChild(list);
+  }
+
+  const link = el('a', 'kalshi-link', 'Trade on Kalshi ↗');
+  link.href = data.match?.url || data.seriesUrl || 'https://kalshi.com';
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  box.appendChild(link);
+  const updated = data.updatedAt ? new Date(data.updatedAt) : null;
+  box.appendChild(el('p', 'odds-foot',
+    `${updated && !isNaN(updated) ? `Prices as of ${updated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}${mc.delay ? ` (shown ${mc.delay}s later, to match your spoiler delay)` : ''}. ` : ''}` +
+    'Kalshi is a regulated US exchange; trading needs a Kalshi account (18+, not available everywhere). For information only, not financial advice.'));
+}

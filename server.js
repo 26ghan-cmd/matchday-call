@@ -9,11 +9,41 @@ const path = require('path');
 const { Server } = require('socket.io');
 const { MatchHub } = require('./match/hub');
 const { zeroFromTap, validTap, computeLags } = require('./match/sync');
+const { kalshiFor } = require('./match/kalshi');
 
 const PORT = process.env.PORT || 3000;
 const MAX_PEERS = 6; // mesh calls work well up to ~6 people
 const CHAT_HISTORY = 100; // messages kept per room for people who join late
 const REACTIONS = ['⚽', '🔥', '😱', '👏', '😂', '🟥'];
+const SOUNDS = ['whistle', 'fulltime', 'airhorn', 'goalhorn', 'roar', 'ooh', 'boo', 'drums'];
+
+// Food runs: only links to known food-delivery services can be shared, so the
+// room can't be sent to a look-alike payment page.
+const FOOD_SERVICES = [
+  ['doordash.com', 'DoorDash'], ['drd.sh', 'DoorDash'],
+  ['ubereats.com', 'Uber Eats'], ['uber.com', 'Uber Eats'], ['ubr.to', 'Uber Eats'],
+  ['grubhub.com', 'Grubhub'], ['seamless.com', 'Seamless'], ['postmates.com', 'Postmates'],
+  ['caviar.com', 'Caviar'], ['gopuff.com', 'Gopuff'], ['instacart.com', 'Instacart'],
+  ['deliveroo.co.uk', 'Deliveroo'], ['deliveroo.com', 'Deliveroo'], ['just-eat.co.uk', 'Just Eat'],
+  ['wolt.com', 'Wolt'], ['skipthedishes.com', 'SkipTheDishes'],
+];
+const FOOD_DEADLINES = {
+  kickoff: { label: 'before kick-off' },
+  halftime: { label: 'by half-time' },
+  15: { label: 'in 15 minutes', minutes: 15 },
+  30: { label: 'in 30 minutes', minutes: 30 },
+  none: { label: 'no rush' },
+};
+const roomFood = new Map(); // room -> { by, service, url, deadline, statuses }
+
+function foodService(raw) {
+  let url;
+  try { url = new URL(String(raw || '').trim()); } catch { return null; }
+  if (url.protocol !== 'https:') return null;
+  const host = url.hostname.toLowerCase();
+  const match = FOOD_SERVICES.find(([domain]) => host === domain || host.endsWith(`.${domain}`));
+  return match ? { url: url.toString(), service: match[1] } : null;
+}
 const DEFAULT_STATE = { mic: true, cam: true, screen: false };
 const chatHistory = new Map(); // room -> [{ id, name, text, ts }]
 
@@ -40,6 +70,15 @@ const roomMatch = new Map(); // room -> fixture id
 hub.on('update', (fixtureId, payload) => {
   if (!payload) return;
   hub.watchersOf(fixtureId).forEach((room) => io.to(room).emit('match', payload));
+});
+
+// Kalshi prices for a match (public market data, cached for everyone).
+app.get('/api/kalshi', async (req, res) => {
+  const id = String(req.query?.fixture || new URL(req.url, 'http://x').searchParams.get('fixture') || '');
+  const f = id ? hub.payload(id)?.fixture : null;
+  const isDemo = f?.source === 'demo';
+  const data = await kalshiFor(isDemo ? null : f?.home.name, isDemo ? null : f?.away.name);
+  res.set('Cache-Control', 'no-store').json({ ...data, demo: isDemo });
 });
 
 app.get('/api/fixtures', async (req, res) => {
@@ -225,6 +264,7 @@ io.on('connection', (socket) => {
       id: socket.id, peers, ice, history: chatHistory.get(room) || [],
       match: matchId ? { fixtureId: matchId, data: hub.payload(matchId) } : null,
       sync: syncState(room),
+      food: roomFood.get(room) || null,
     });
     socket.to(room).emit('peer-joined', { id: socket.id, name, state: socket.data.state });
   });
@@ -296,6 +336,52 @@ io.on('connection', (socket) => {
     broadcastSync(room);
   });
 
+  // Soundboard: play a sound for everyone in the room.
+  socket.on('sound', ({ sound } = {}) => {
+    const room = socket.data.room;
+    if (!room || !SOUNDS.includes(sound) || tooSoon(socket, 'sound', 1200)) return;
+    io.to(room).emit('sound', { id: socket.id, name: socket.data.name, sound });
+  });
+
+  // Food runs: one shared group-order link per room.
+  socket.on('food-start', ({ url, deadline } = {}) => {
+    const room = socket.data.room;
+    if (!room) return;
+    const found = foodService(url);
+    if (!found) {
+      socket.emit('food-error', { message: 'Paste a group-order link from DoorDash, Uber Eats, Grubhub or another delivery app.' });
+      return;
+    }
+    if (tooSoon(socket, 'food', 1000)) return; // only valid links count towards the limit
+    const d = FOOD_DEADLINES[deadline] || FOOD_DEADLINES.none;
+    const run = {
+      by: socket.data.name,
+      byId: socket.id,
+      service: found.service,
+      url: found.url,
+      deadline: { key: String(deadline || 'none'), label: d.label, at: d.minutes ? Date.now() + d.minutes * 60e3 : null },
+      startedAt: Date.now(),
+      statuses: { [socket.id]: { name: socket.data.name, status: 'in' } },
+    };
+    roomFood.set(room, run);
+    io.to(room).emit('food-state', { run, event: 'started', by: socket.data.name });
+  });
+
+  socket.on('food-status', ({ status } = {}) => {
+    const room = socket.data.room;
+    const run = room && roomFood.get(room);
+    if (!run || !['in', 'ordered', 'out'].includes(status) || tooSoon(socket, 'food-status', 300)) return;
+    run.statuses[socket.id] = { name: socket.data.name, status };
+    io.to(room).emit('food-state', { run, event: 'status' });
+  });
+
+  socket.on('food-end', () => {
+    const room = socket.data.room;
+    if (!room || !roomFood.has(room)) return;
+    roomFood.delete(room);
+    io.to(room).emit('food-state', { run: null, event: 'ended', by: socket.data.name });
+  });
+
   // Quick emoji reactions.
   socket.on('reaction', ({ emoji } = {}) => {
     const room = socket.data.room;
@@ -324,6 +410,7 @@ io.on('connection', (socket) => {
     if (!io.sockets.adapter.rooms.get(room)) {
       chatHistory.delete(room);
       roomSync.delete(room);
+      roomFood.delete(room);
       followMatch(room, null); // stop fetching data nobody is watching
     } else if (roomSync.get(room)?.delete(socket.id)) {
       broadcastSync(room);

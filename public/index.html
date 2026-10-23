@@ -84,6 +84,7 @@
                     <button data-mc="stats" class="active" role="tab">Stats</button>
                     <button data-mc="pbp" role="tab">Play-by-play</button>
                     <button data-mc="odds" role="tab">Odds</button>
+                    <button data-mc="kalshi" role="tab">Kalshi</button>
                     <button data-mc="lineups" role="tab">Lineups</button>
                   </div>
                   <div class="mc-tools">
@@ -98,6 +99,7 @@
                     <ol id="mcFeed" class="mc-feed"></ol>
                   </div>
                   <div class="mc-pane" data-pane="odds"><div id="mcOdds" class="mc-odds"></div></div>
+                  <div class="mc-pane" data-pane="kalshi"><div id="mcKalshi" class="mc-kalshi"></div></div>
                   <div class="mc-pane" data-pane="lineups"><div id="mcLineups" class="mc-lineups"></div></div>
                 </div>
               </div>
@@ -121,6 +123,7 @@
           <div class="tabs" role="tablist">
             <button class="tab active" data-tab="chat" role="tab">Chat</button>
             <button class="tab" data-tab="match" role="tab">Match</button>
+            <button class="tab" data-tab="food" role="tab">Food</button>
             <button class="tab" data-tab="people" role="tab">People</button>
           </div>
           <button id="closePanel" class="icon-btn" title="Close">✕</button>
@@ -133,6 +136,51 @@
           </form>
         </div>
         <div id="matchPane" class="pane match-pane" hidden></div>
+        <div id="foodPane" class="pane food-pane" hidden>
+          <!-- No food run yet -->
+          <div id="foodStart" class="food-start">
+            <h3>🍕 Get food in for the match</h3>
+            <ol class="food-steps">
+              <li>Start a <strong>group order</strong> in your delivery app.</li>
+              <li>Copy its share link and paste it here.</li>
+              <li>Everyone adds their own food to the same order.</li>
+            </ol>
+            <div class="food-apps">
+              <a href="https://www.doordash.com/" target="_blank" rel="noopener noreferrer">DoorDash ↗</a>
+              <a href="https://www.ubereats.com/" target="_blank" rel="noopener noreferrer">Uber Eats ↗</a>
+              <a href="https://www.grubhub.com/" target="_blank" rel="noopener noreferrer">Grubhub ↗</a>
+            </div>
+            <form id="foodForm" class="food-form">
+              <label>Group-order link
+                <input id="foodUrl" type="url" required placeholder="https://drd.sh/…" autocomplete="off">
+              </label>
+              <label>Order by
+                <select id="foodDeadline">
+                  <option value="kickoff">Before kick-off</option>
+                  <option value="halftime">Half-time</option>
+                  <option value="15">In 15 minutes</option>
+                  <option value="30">In 30 minutes</option>
+                  <option value="none">No rush</option>
+                </select>
+              </label>
+              <button type="submit" class="primary-btn">Start food run</button>
+              <p id="foodError" class="error" role="alert"></p>
+            </form>
+          </div>
+          <!-- A food run is on -->
+          <div id="foodRun" class="food-run" hidden>
+            <p id="foodHeadline" class="food-headline"></p>
+            <p id="foodDeadlineText" class="food-deadline"></p>
+            <a id="foodOpen" class="primary-btn food-open" target="_blank" rel="noopener noreferrer">Add my order ↗</a>
+            <div class="food-status" role="group" aria-label="Your status">
+              <button type="button" data-status="in">I'm in</button>
+              <button type="button" data-status="ordered">Ordered ✓</button>
+              <button type="button" data-status="out">Not this time</button>
+            </div>
+            <ul id="foodPeople" class="food-people"></ul>
+            <button type="button" id="foodEnd" class="small-btn">End food run</button>
+          </div>
+        </div>
         <div id="peoplePane" class="pane" hidden>
           <ul id="peopleList" class="people-list"></ul>
         </div>
@@ -144,9 +192,19 @@
       <button id="camBtn" class="ctl on" title="Camera on / off (V)">📷 <span>Camera on</span></button>
       <button id="shareBtn" class="ctl" title="Share your screen (S)">🖥️ <span>Share screen</span></button>
       <div class="react-wrap">
-        <button id="reactBtn" class="ctl" title="Reactions (1-6)">⚽ <span>React</span></button>
-        <div id="reactionTray" class="reaction-tray" hidden></div>
+        <button id="reactBtn" class="ctl" title="Reactions (1-6) and soundboard">⚽ <span>React</span></button>
+        <div id="reactionTray" class="reaction-tray" hidden>
+          <div class="tray-emojis"></div>
+          <p class="tray-title">Soundboard <small>everyone hears it</small></p>
+          <div class="tray-sounds"></div>
+          <div class="tray-volume">
+            <span aria-hidden="true">🔈</span>
+            <input type="range" id="soundVolume" min="0" max="100" aria-label="Soundboard volume">
+            <button type="button" id="soundMute" class="small-btn">Sounds on</button>
+          </div>
+        </div>
       </div>
+      <button id="foodBtn" class="ctl" title="Order food together">🍕 <span>Food</span><b id="foodBadge" class="badge dot" hidden></b></button>
       <button id="chatBtn" class="ctl" title="Chat (C)">💬 <span>Chat</span><b id="unreadBadge" class="badge" hidden>0</b></button>
       <button id="settingsBtn" class="ctl" title="Settings">⚙️ <span>Settings</span></button>
       <button id="inviteBtn" class="ctl">🔗 <span>Invite</span></button>
@@ -244,5 +302,7 @@
   <script src="app.js"></script>
   <script src="match.js"></script>
   <script src="sync.js"></script>
+  <script src="sounds.js"></script>
+  <script src="food.js"></script>
 </body>
 </html>

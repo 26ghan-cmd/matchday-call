@@ -48,6 +48,19 @@ to avoid feedback.
 - **People list:** everyone's mic/camera/sharing status, pin buttons, and a
   volume slider per person.
 - **Reactions:** ⚽ 🔥 😱 👏 😂 🟥 float over your tile and the telly.
+- **Soundboard** (in the React tray): whistle, full-time whistle, air horn, goal
+  horn, crowd roar, "ooh!", boos and drums, played for everyone. All made in code
+  with Web Audio (no recordings). Held back by the spoiler shield like reactions;
+  each person has their own volume and can switch sounds off.
+- **Food runs:** start a group order in DoorDash, Uber Eats, Grubhub etc., paste its
+  share link in the **Food** tab, and pick a deadline. Everyone gets a card to add
+  their own food and mark "I'm in" / "Ordered ✓". Only links to known delivery
+  apps are accepted. (Delivery apps don't let other apps place orders, but group
+  orders do the job.)
+- **Kalshi tab** in the match centre: live prediction-market prices for the match
+  (home / draw / away, as a % chance) from Kalshi's public market data, plus
+  other Premier League games, and a link to trade on Kalshi. Read-only: no Kalshi
+  account or key is stored here. Prices follow your spoiler delay.
 - **Settings:** choose microphone, camera and speakers (speaker choice works in
   Chrome and Edge).
 - **Talking ring:** a green outline around whoever is speaking.
@@ -78,10 +91,14 @@ match/demo.js    The demo match: fictional clubs, simulated play, modelled odds.
 match/feed.js    Turns data changes into play-by-play lines and stats-based analysis.
 match/ai.js      Optional AI-written analysis (Claude).
 match/sync.js    TV sync maths: from each person's clock taps, how far behind their TV is.
+match/kalshi.js  Kalshi prices for Premier League games, matched to our fixtures.
+match/teams.js   Recognising clubs under different names (Man Utd = Manchester United).
 public/app.js    WebRTC: every browser connects directly to every other (a "mesh").
                  Each connection has three fixed slots (mic, camera, screen), so
                  sharing or switching devices never interrupts the call.
 public/match.js  The match centre interface and the spoiler delay.
+public/sounds.js Soundboard (synthesized sounds).
+public/food.js   Food runs.
 public/sync.js   Sync dialog, shared clock, and the spoiler shield: delayed audio
                  (Web Audio), delayed video (a rolling buffer of small snapshots),
                  and held-back chat and reactions.
@@ -96,6 +113,7 @@ environment variables on your host (Render: your service → Environment):
 | Variable | What it does |
 |---|---|
 | `API_FOOTBALL_KEY` | Live Premier League fixtures, scores, stats, events, lineups and odds from [API-Football](https://www.api-football.com/pricing). The free plan (100 requests/day, limited seasons) isn't enough for live matches; the Pro plan ($19/month, 7,500/day) is. |
+| (Kalshi) | Nothing to set up: Kalshi's market data is public. `KALSHI_API_BASE` overrides the API address (for testing). |
 | `ANTHROPIC_API_KEY` | Optional. Analysis lines written by Claude instead of the built-in stats-based ones. Costs a few cents per match. Get a key at console.anthropic.com. |
 
 Optional tuning:

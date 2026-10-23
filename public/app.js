@@ -771,6 +771,8 @@ function setTab(tab) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
   $('#chatPane').hidden = tab !== 'chat';
   $('#matchPane').hidden = tab !== 'match';
+  $('#foodPane').hidden = tab !== 'food';
+  if (tab === 'food' && typeof onFoodTabOpened === 'function') onFoodTabOpened();
   $('#peoplePane').hidden = tab !== 'people';
   if (typeof placeMatchCentre === 'function') placeMatchCentre();
   if (tab === 'chat') {
@@ -856,13 +858,15 @@ function setVolume(id, v) {
 // =====================================================================
 function buildReactionTray() {
   const tray = $('#reactionTray');
-  if (tray.children.length) return;
+  const row = tray.querySelector('.tray-emojis') || tray;
+  if (row.children.length) return;
   REACTIONS.forEach((emoji, i) => {
     const b = document.createElement('button');
+    b.type = 'button';
     b.textContent = emoji;
     b.title = `React (${i + 1})`;
     b.onclick = () => { sendReaction(emoji); tray.hidden = true; };
-    tray.appendChild(b);
+    row.appendChild(b);
   });
 }
 function sendReaction(emoji) { socket.emit('reaction', { emoji }); }
