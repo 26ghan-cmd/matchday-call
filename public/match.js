@@ -88,6 +88,8 @@ function closePicker() {
 function renderPicker({ configured, fixtures = [], error }) {
   const note = !configured
     ? 'Live Premier League data isn’t switched on for this app yet. Try the demo match to see how it works.'
+    : error && /free plans? do not have access/i.test(error)
+      ? 'Your API-Football plan doesn’t include the current season, so today’s games can’t be followed live. Replay a past match below, or upgrade to a paid plan for live games.'
     : error ? `Couldn’t refresh fixtures (${error}).`
     : fixtures.length ? 'Pick a match. Everyone in the room will follow it.'
     : 'No Premier League matches in the next few days.';
@@ -128,6 +130,85 @@ function renderPicker({ configured, fixtures = [], error }) {
   const grid = el('div', 'mc-fixture-grid');
   grid.appendChild(demo);
   box.appendChild(grid);
+
+  if (configured) {
+    const replayBox = el('div', 'mc-replays');
+    box.appendChild(replayBox);
+    renderReplayPicker(replayBox);
+  }
+}
+
+// ---------- Replays: a finished match played back as if live ----------
+const replayState = { season: 2024, team: '', speed: 'fast', lists: new Map() };
+
+async function renderReplayPicker(box) {
+  box.replaceChildren(el('h4', 'mc-group', 'Replay a past match'));
+  box.appendChild(el('p', 'mc-note', 'Plays a finished Premier League match through the match centre as if it were live: real goals, cards, subs and lineups at the right minutes. Stats build up evenly and the odds are modelled.'));
+
+  const controls = el('div', 'replay-controls');
+  const seasonSel = el('select');
+  seasonSel.setAttribute('aria-label', 'Season');
+  [[2024, '2024/25'], [2023, '2023/24'], [2022, '2022/23']].forEach(([y, label]) => {
+    const o = new Option(label, y);
+    o.selected = y === replayState.season;
+    seasonSel.appendChild(o);
+  });
+  const teamSel = el('select');
+  teamSel.setAttribute('aria-label', 'Team');
+  const speedSel = el('select');
+  speedSel.setAttribute('aria-label', 'Speed');
+  [['fast', 'Fast (about 7 minutes)'], ['real', 'Real time (about 2 hours)']].forEach(([v, label]) => {
+    const o = new Option(label, v);
+    o.selected = v === replayState.speed;
+    speedSel.appendChild(o);
+  });
+  controls.append(seasonSel, teamSel, speedSel);
+  box.appendChild(controls);
+  const listBox = el('div', 'mc-fixture-grid replay-list');
+  box.appendChild(listBox);
+
+  seasonSel.onchange = () => { replayState.season = Number(seasonSel.value); replayState.team = ''; renderReplayPicker(box); };
+  speedSel.onchange = () => { replayState.speed = speedSel.value; };
+  teamSel.onchange = () => { replayState.team = teamSel.value; fillList(); };
+
+  let data = replayState.lists.get(replayState.season);
+  if (!data) {
+    listBox.appendChild(el('p', 'mc-empty', 'Loading matches…'));
+    try {
+      data = await (await fetch(`/api/replays?season=${replayState.season}`)).json();
+      if (!data.error) replayState.lists.set(replayState.season, data);
+    } catch {
+      data = { fixtures: [], error: 'Could not load past matches.' };
+    }
+  }
+  const fixtures = data.fixtures || [];
+  const teams = [...new Set(fixtures.flatMap((f) => [f.home.name, f.away.name]))].sort();
+  teamSel.replaceChildren(new Option('All teams', ''), ...teams.map((t) => new Option(t, t)));
+  teamSel.value = replayState.team;
+
+  function fillList() {
+    listBox.replaceChildren();
+    if (data.error) {
+      listBox.appendChild(el('p', 'mc-empty', `Couldn’t load past matches (${data.error}).`));
+      return;
+    }
+    const shown = fixtures
+      .filter((f) => !replayState.team || f.home.name === replayState.team || f.away.name === replayState.team)
+      .sort((a, b) => new Date(b.kickoff) - new Date(a.kickoff))
+      .slice(0, replayState.team ? 40 : 20);
+    if (!shown.length) listBox.appendChild(el('p', 'mc-empty', 'No matches found.'));
+    shown.forEach((f) => {
+      const b = el('button', 'mc-fixture');
+      const teamsRow = el('span', 'mc-fx-teams');
+      teamsRow.append(el('span', '', f.home.name), el('strong', 'mc-fx-score', `${f.home.goals}–${f.away.goals}`), el('span', '', f.away.name));
+      const when = el('span', 'mc-fx-when', `${new Date(f.kickoff).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })} · ${f.round.replace('Regular Season - ', 'Matchweek ')}`);
+      b.append(teamsRow, when);
+      b.onclick = () => selectMatch(`replay:${f.id}:${replayState.speed}`);
+      listBox.appendChild(b);
+    });
+    if (!replayState.team) listBox.appendChild(el('p', 'mc-note replay-hint', 'Showing the 20 most recent. Pick a team to see all their matches.'));
+  }
+  fillList();
 }
 
 function fixtureButton(f) {
@@ -635,7 +716,9 @@ function renderKalshi(data) {
     box.appendChild(sec);
   } else {
     box.appendChild(el('p', 'mc-empty', data.demo
-      ? 'The demo match isn’t on Kalshi (the clubs are made up). Real Premier League games are listed below.'
+      ? (mc.shown?.fixture?.source === 'replay'
+        ? 'Replays aren’t on Kalshi (the match has already been played). Upcoming Premier League games are listed below.'
+        : 'The demo match isn’t on Kalshi (the clubs are made up). Real Premier League games are listed below.')
       : 'Kalshi doesn’t have a market for this match right now.'));
   }
 
@@ -713,6 +796,9 @@ function drawProbChart() {
   });
   head.appendChild(legend);
   box.appendChild(head);
+  if (f.source === 'demo' || f.source === 'replay') {
+    box.appendChild(el('p', 'prob-note', 'Modelled from the score and time, not real odds.'));
+  }
 
   if (h.length < 1) {
     box.appendChild(el('p', 'prob-empty', 'The chart fills in from the live odds once they’re available for this match.'));

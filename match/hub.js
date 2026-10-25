@@ -6,6 +6,7 @@
 const { EventEmitter } = require('events');
 const { ApiFootball, LIVE_STATUSES, FINISHED_STATUSES } = require('./api-football');
 const { DemoMatch } = require('./demo');
+const { ReplayMatch, REPLAY_SEASONS, FINISHED, seasonLabel } = require('./replay');
 const { Feed, templateAnalysis } = require('./feed');
 const { claudeAnalysis, aiEnabled } = require('./ai');
 
@@ -61,6 +62,7 @@ class MatchHub extends EventEmitter {
     this.matches = new Map();   // fixtureId -> match state
     this.fixtureCache = { at: 0, list: null, error: null };
     this.demoCount = 0;
+    this.seasons = new Map(); // season -> { list, at, error } for replays
   }
 
   get provider() { return this.api.configured ? 'api-football' : 'none'; }
@@ -84,6 +86,31 @@ class MatchHub extends EventEmitter {
     return result;
   }
 
+  // ---------------- Replays (past seasons) ----------------
+  async replayList(season) {
+    season = Number(season);
+    const result = { configured: this.api.configured, seasons: REPLAY_SEASONS.map((y) => ({ year: y, label: seasonLabel(y) })), season, fixtures: [], error: null };
+    if (!this.api.configured || !REPLAY_SEASONS.includes(season)) return result;
+    let entry = this.seasons.get(season);
+    if (!entry || (entry.error && Date.now() - entry.at > 60e3)) {
+      try {
+        // A finished season never changes, so one request per season is enough.
+        entry = { list: (await this.api.seasonFixtures(season)).filter((f) => FINISHED.has(f.status.short)), at: Date.now(), error: null };
+      } catch (err) {
+        this.log.error('Replay list failed:', err.message);
+        entry = { list: entry?.list || [], at: Date.now(), error: err.message };
+      }
+      this.seasons.set(season, entry);
+    }
+    result.fixtures = entry.list;
+    result.error = entry.error;
+    return result;
+  }
+
+  isReplayable(fixtureId) {
+    return [...this.seasons.values()].some((e) => e.list.some((f) => f.id === String(fixtureId)));
+  }
+
   isKnownFixture(id) {
     return this.matches.has(id) || (this.fixtureCache.list || []).some((f) => f.id === id);
   }
@@ -93,13 +120,21 @@ class MatchHub extends EventEmitter {
   // ('demo' becomes a fresh demo match for that room).
   watch(requestedId, room) {
     let id = String(requestedId);
+    let replay = null;
     if (id === 'demo') id = `demo-${++this.demoCount}`;
+    else if (id.startsWith('replay:')) {
+      // "replay:<fixture id>:<fast|real>" -> a fresh replay for this room
+      const [, fixtureId, speed] = id.split(':');
+      replay = { fixtureId, speed };
+      id = `replay-${fixtureId}-${++this.demoCount}`;
+    }
     let m = this.matches.get(id);
     if (!m) {
       m = { id, watchers: new Set(), fixture: null, odds: null, oddsHistory: [], feed: new Feed(), timers: [], stopped: false,
         analysing: false, pendingReason: null, version: 0 };
       this.matches.set(id, m);
       if (id.startsWith('demo-')) this.startDemo(m);
+      else if (replay) this.startReplay(m, replay);
       else this.startLive(m);
     }
     m.watchers.add(room);
@@ -142,6 +177,28 @@ class MatchHub extends EventEmitter {
         m.odds = odds;
         recordOdds(m);
         this.publish(m);
+      },
+    });
+    m.demo.start();
+  }
+
+  // ---------------- Replay ----------------
+  startReplay(m, { fixtureId, speed }) {
+    m.demo = new ReplayMatch({
+      id: m.id,
+      fixtureId,
+      api: this.api,
+      secondsPerMinute: speed === 'real' ? 60 : DEMO_SECONDS_PER_MINUTE,
+      onUpdate: (fixture, odds) => {
+        if (m.stopped) return;
+        this.applyFixture(m, fixture);
+        m.odds = odds;
+        recordOdds(m);
+        this.publish(m);
+      },
+      onError: (err) => {
+        this.log.error(`Replay ${fixtureId}:`, err.message);
+        this.emit('replay-error', m.id, err.message);
       },
     });
     m.demo.start();

@@ -108,6 +108,16 @@ public/sync.js   Sync dialog, shared clock, and the spoiler shield: delayed audi
 public/*.html/css  The interface.
 ```
 
+## Replay a past match
+
+In the match picker, **Replay a past match** plays a finished Premier League game
+(2022/23 to 2024/25) through the match centre as if it were live: real goals,
+cards, subs, VAR and lineups at the right minutes, at fast (about 7 minutes) or
+real-time speed. Counting stats build up evenly to the real full-time numbers
+and the odds are modelled, because old matches only keep final stats and no
+odds. Each replay uses about two API-Football requests, so it works on the free
+plan, which doesn't include the current season.
+
 ## Match data setup
 
 Without any keys, the match centre offers the **demo match** only. Add these

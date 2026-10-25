@@ -45,9 +45,9 @@ function poisson(lambda, maxGoals = 10) {
 }
 const toOdds = (p, margin = 1.06) => Math.round(clamp(1 / Math.max(p * margin, 1e-4), 1.01, 101) * 100) / 100;
 
-function modelOdds(m) {
+function modelOdds(m, teams = TEAMS) {
   const minutesLeft = Math.max(0, 93 - m.minute);
-  const factor = (side) => TEAMS[side === 'home' ? 0 : 1].attack * 0.75 ** m.stats[side].red;
+  const factor = (side) => teams[side === 'home' ? 0 : 1].attack * 0.75 ** m.stats[side].red;
   const lh = 1.35 * factor('home') * (minutesLeft / 93);
   const la = 1.35 * factor('away') * (minutesLeft / 93);
   const ph = poisson(lh), pa = poisson(la);
@@ -61,9 +61,9 @@ function modelOdds(m) {
   const markets = [{
     key: 'result', name: 'Full-time result',
     values: [
-      { key: 'home', label: TEAMS[0].name, odd: toOdds(home) },
+      { key: 'home', label: teams[0].name, odd: toOdds(home) },
       { key: 'draw', label: 'Draw', odd: toOdds(draw) },
-      { key: 'away', label: TEAMS[1].name, odd: toOdds(away) },
+      { key: 'away', label: teams[1].name, odd: toOdds(away) },
     ],
   }];
 
@@ -73,9 +73,9 @@ function modelOdds(m) {
     markets.push({
       key: 'next', name: 'Next goal',
       values: [
-        { key: 'home', label: TEAMS[0].name, odd: toOdds((1 - none) * (lh / lt)) },
+        { key: 'home', label: teams[0].name, odd: toOdds((1 - none) * (lh / lt)) },
         { key: 'none', label: 'No more goals', odd: toOdds(none) },
-        { key: 'away', label: TEAMS[1].name, odd: toOdds((1 - none) * (la / lt)) },
+        { key: 'away', label: teams[1].name, odd: toOdds((1 - none) * (la / lt)) },
       ],
     });
   }

@@ -76,9 +76,19 @@ hub.on('update', (fixtureId, payload) => {
 app.get('/api/kalshi', async (req, res) => {
   const id = String(req.query?.fixture || new URL(req.url, 'http://x').searchParams.get('fixture') || '');
   const f = id ? hub.payload(id)?.fixture : null;
-  const isDemo = f?.source === 'demo';
+  const isDemo = f?.source === 'demo' || f?.source === 'replay';
   const data = await kalshiFor(isDemo ? null : f?.home.name, isDemo ? null : f?.away.name);
   res.set('Cache-Control', 'no-store').json({ ...data, demo: isDemo });
+});
+
+// Past matches that can be replayed (one season at a time).
+app.get('/api/replays', async (req, res) => {
+  const season = Number(req.query?.season || new URL(req.url, 'http://x').searchParams.get('season') || 2024);
+  res.set('Cache-Control', 'no-store').json(await hub.replayList(season));
+});
+
+hub.on('replay-error', (fixtureId, message) => {
+  hub.watchersOf(fixtureId).forEach((room) => io.to(room).emit('match-error', { message: `Couldn't load that replay (${message}).` }));
 });
 
 app.get('/api/fixtures', async (req, res) => {
@@ -289,7 +299,13 @@ io.on('connection', (socket) => {
     const room = socket.data.room;
     if (!room || tooSoon(socket, 'select', 1500)) return;
     let id = fixtureId == null ? null : String(fixtureId).slice(0, 32);
-    if (id && id !== 'demo') {
+    if (id && id.startsWith('replay:')) {
+      const [, fixtureId, speed] = id.split(':');
+      if (!/^\d+$/.test(fixtureId || '') || !['fast', 'real'].includes(speed) || !hub.isReplayable(fixtureId)) {
+        socket.emit('match-error', { message: "Couldn't find that past match." });
+        return;
+      }
+    } else if (id && id !== 'demo') {
       await hub.listFixtures(); // make sure the fixture list is loaded
       if (!socket.connected || socket.data.room !== room) return;
       if (!hub.isKnownFixture(id)) {

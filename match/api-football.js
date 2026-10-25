@@ -4,7 +4,7 @@
 // (see normalizeFixture / normalizeOdds), so the rest of the app never depends
 // on this provider's quirks.
 
-const BASE = 'https://v3.football.api-sports.io';
+const BASE = process.env.API_FOOTBALL_BASE || 'https://v3.football.api-sports.io'; // override for testing
 const PREMIER_LEAGUE = 39;
 
 const SHORT_NAMES = {
@@ -62,6 +62,19 @@ class ApiFootball {
       league: PREMIER_LEAGUE, season: this.season, from: day(-1), to: day(7), timezone: 'UTC',
     });
     return list.map(summarizeFixture);
+  }
+
+  // A whole Premier League season's fixtures in one request (used for replays).
+  async seasonFixtures(season) {
+    const list = await this.get('/fixtures', { league: PREMIER_LEAGUE, season, timezone: 'UTC' });
+    return list.map(summarizeFixture);
+  }
+
+  // The full raw fixture (events, lineups, stats), for replays.
+  async rawFixture(id) {
+    const [raw] = await this.get('/fixtures', { id });
+    if (!raw) throw new Error(`Fixture ${id} not found`);
+    return raw;
   }
 
   async fixture(id) {
