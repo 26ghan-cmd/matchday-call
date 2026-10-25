@@ -1,5 +1,5 @@
 {
-  "name": "matchday-call",
+  "name": "premcall",
   "version": "0.1.0",
   "description": "Video calls for watching Premier League matches with friends",
   "main": "server.js",

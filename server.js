@@ -1,4 +1,4 @@
-// Matchday Call — server.
+// PremCall — server.
 // Video and audio flow directly between browsers (WebRTC). This server
 // introduces people in the same room, relays chat and reactions, and serves
 // live match data (score, stats, play-by-play, odds) to each room.
@@ -435,7 +435,7 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Matchday Call running at http://localhost:${PORT}`);
+  console.log(`PremCall running at http://localhost:${PORT}`);
   const env = process.env;
   const provider = relayProvider();
   console.log(provider

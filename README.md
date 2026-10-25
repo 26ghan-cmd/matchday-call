@@ -1,4 +1,4 @@
-# Matchday Call
+# PremCall
 
 Video calls for watching Premier League matches with friends. Each person watches
 the match on their own TV or stream; this app is the "second screen" where you see

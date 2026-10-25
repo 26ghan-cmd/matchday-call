@@ -1,5 +1,5 @@
 'use strict';
-// Matchday Call — browser client.
+// PremCall — browser client.
 //
 // Everyone connects directly to everyone else (a "mesh"). Each connection has
 // three fixed slots: 0 = mic, 1 = camera, 2 = screen share. Because the slots
