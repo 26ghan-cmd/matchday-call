@@ -4,21 +4,35 @@ Video calls for watching Premier League matches with friends. Each person watche
 the match on their own TV or stream; this app is the "second screen" where you see
 and hear each other.
 
-## Run it
+## Using it
 
-You need [Node.js](https://nodejs.org) 18 or newer.
+PremCall is hosted on Render, so there's nothing to install:
+
+1. Open your Render link (e.g. `https://your-app.onrender.com`).
+2. Allow camera and mic, enter your name and join a room.
+3. Click **Invite** to copy the room link and send it to your friends.
+
+Every push to this repository's `main` branch redeploys the app automatically.
+Settings such as API keys live in Render under **Environment** (see
+[Match data setup](#match-data-setup) and [Calling friends in other places](#calling-friends-in-other-places)).
+
+**Try a call on your own:** open the same room link in a second browser tab.
+You'll see yourself twice. Wear headphones or mute one tab to avoid feedback.
+
+## Running it on your own computer
+
+Only needed to try changes before putting them live. You need
+[Node.js](https://nodejs.org) 18 or newer and a fresh copy of this repository:
 
 ```bash
+git clone https://github.com/26ghan-cmd/matchday-call.git
 cd matchday-call
 npm install
 npm start
 ```
 
-Open http://localhost:3000, allow camera and mic, enter your name and join.
-
-**Try a call on one computer:** open a second browser tab (or a different browser)
-at the same room link. You'll see yourself twice. Wear headphones or mute one tab
-to avoid feedback.
+Open http://localhost:3000. Without the environment variables you use on Render,
+the match centre offers the demo match only and calls work best on the same network.
 
 ## What's in it
 
