@@ -139,9 +139,8 @@ environment variables on your host (Render: your service → Environment):
 
 | Variable | What it does |
 |---|---|
-| `API_FOOTBALL_KEY` | Live Premier League fixtures, scores, stats, events, lineups and odds from [API-Football](https://www.api-football.com/pricing). The free plan (100 requests/day, limited seasons) isn't enough for live matches; the Pro plan ($19/month, 7,500/day) is. |
+| `API_FOOTBALL_KEY` | Live Premier League fixtures, scores, stats, events, lineups and odds from [API-Football](https://www.api-football.com/pricing). |
 | (Kalshi) | Nothing to set up: Kalshi's market data is public. `KALSHI_API_BASE` overrides the API address (for testing). |
-| `ANTHROPIC_API_KEY` | Optional. Analysis lines written by Claude instead of the built-in stats-based ones. Costs a few cents per match. Get a key at console.anthropic.com. |
 
 Optional tuning:
 
@@ -151,7 +150,6 @@ Optional tuning:
 | `ODDS_POLL_SECONDS` | 30 | How often live odds are refreshed |
 | `PL_SEASON` | automatic | Season year, e.g. 2026 for 2026/27 |
 | `DEMO_SECONDS_PER_MINUTE` | 4 | Demo match speed (4 → a full match takes about 7 minutes) |
-| `ANTHROPIC_MODEL` | claude-haiku-5-5 | Model used for analysis |
 
 Each live match uses about 700 API-Football requests (2 hours of updates), however
 many rooms are watching it. The server slows down automatically if the daily
